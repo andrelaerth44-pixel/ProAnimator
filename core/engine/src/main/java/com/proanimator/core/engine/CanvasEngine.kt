@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlin.math.pow
 import kotlin.math.sqrt
 
 enum class ToolMode {
@@ -15,10 +14,6 @@ enum class ToolMode {
     ERASE
 }
 
-/**
- * Core painting engine.
- * Manages layers, strokes, undo/redo, brush state and tools.
- */
 class CanvasEngine(
     val width: Int,
     val height: Int
@@ -46,6 +41,9 @@ class CanvasEngine(
 
     private val _toolMode = MutableStateFlow(ToolMode.DRAW)
     val toolMode: StateFlow<ToolMode> = _toolMode.asStateFlow()
+
+    private val _stabilization = MutableStateFlow(0.35f) // 0f = none, 1f = max
+    val stabilization: StateFlow<Float> = _stabilization.asStateFlow()
 
     // Undo / Redo
     private val undoStack = mutableListOf<Map<String, List<Stroke>>>()
@@ -81,20 +79,24 @@ class CanvasEngine(
         _currentSize.value = size.coerceIn(1f, 200f)
     }
 
+    fun setStabilization(value: Float) {
+        _stabilization.value = value.coerceIn(0f, 1f)
+    }
+
     fun startStroke(point: StrokePoint) {
         _currentStroke.value = listOf(point)
     }
 
     fun addPointToStroke(point: StrokePoint) {
         _currentStroke.update { current ->
-            if (current.isEmpty()) listOf(point)
-            else {
-                // Simple distance-based filtering to reduce points
+            if (current.isEmpty()) {
+                listOf(point)
+            } else {
                 val last = current.last()
                 val dx = point.x - last.x
                 val dy = point.y - last.y
                 val dist = sqrt(dx * dx + dy * dy)
-                if (dist > 1.5f) current + point else current
+                if (dist > 1.2f) current + point else current
             }
         }
     }
@@ -106,8 +108,7 @@ class CanvasEngine(
             return null
         }
 
-        // Apply light smoothing
-        val smoothed = smoothStroke(rawPoints)
+        val smoothed = smoothStroke(rawPoints, _stabilization.value)
 
         val isEraser = _toolMode.value == ToolMode.ERASE
 
@@ -116,26 +117,16 @@ class CanvasEngine(
             brushId = if (isEraser) "eraser" else _currentBrushId.value,
             color = if (isEraser) 0x00000000 else _currentColor.value,
             size = _currentSize.value,
-            opacity = if (isEraser) 1f else 1f
+            opacity = 1f
         )
 
         val layerId = _activeLayerId.value
 
         pushUndoState()
 
-        if (isEraser) {
-            // Simple eraser: remove strokes that intersect the eraser path (basic version)
-            // For Phase 1 we just add an "eraser stroke" that will be rendered with clear blend later
-            // For now we store it and handle visually in the UI
-            _strokesByLayer.update { current ->
-                val existing = current[layerId] ?: emptyList()
-                current + (layerId to (existing + stroke))
-            }
-        } else {
-            _strokesByLayer.update { current ->
-                val existing = current[layerId] ?: emptyList()
-                current + (layerId to (existing + stroke))
-            }
+        _strokesByLayer.update { current ->
+            val existing = current[layerId] ?: emptyList()
+            current + (layerId to (existing + stroke))
         }
 
         _currentStroke.value = emptyList()
@@ -145,30 +136,37 @@ class CanvasEngine(
         return stroke
     }
 
-    /** Very light moving-average smoothing */
-    private fun smoothStroke(points: List<StrokePoint>): List<StrokePoint> {
-        if (points.size < 3) return points
+    private fun smoothStroke(points: List<StrokePoint>, amount: Float): List<StrokePoint> {
+        if (points.size < 3 || amount <= 0f) return points
 
         val result = mutableListOf<StrokePoint>()
         result.add(points.first())
 
-        for (i in 1 until points.lastIndex) {
-            val prev = points[i - 1]
-            val curr = points[i]
-            val next = points[i + 1]
+        val window = (2 + (amount * 4)).toInt().coerceIn(2, 6)
 
-            val smoothedX = (prev.x + curr.x * 2 + next.x) / 4f
-            val smoothedY = (prev.y + curr.y * 2 + next.y) / 4f
-            val smoothedPressure = (prev.pressure + curr.pressure + next.pressure) / 3f
+        for (i in 1 until points.lastIndex) {
+            var sumX = 0f
+            var sumY = 0f
+            var sumP = 0f
+            var count = 0
+
+            for (j in (i - window)..(i + window)) {
+                if (j in points.indices) {
+                    sumX += points[j].x
+                    sumY += points[j].y
+                    sumP += points[j].pressure
+                    count++
+                }
+            }
 
             result.add(
                 StrokePoint(
-                    x = smoothedX,
-                    y = smoothedY,
-                    pressure = smoothedPressure,
-                    tiltX = curr.tiltX,
-                    tiltY = curr.tiltY,
-                    timestamp = curr.timestamp
+                    x = sumX / count,
+                    y = sumY / count,
+                    pressure = sumP / count,
+                    tiltX = points[i].tiltX,
+                    tiltY = points[i].tiltY,
+                    timestamp = points[i].timestamp
                 )
             )
         }
@@ -179,24 +177,20 @@ class CanvasEngine(
 
     private fun pushUndoState() {
         undoStack.add(_strokesByLayer.value.toMap())
-        if (undoStack.size > 50) {
-            undoStack.removeAt(0)
-        }
+        if (undoStack.size > 50) undoStack.removeAt(0)
     }
 
     fun undo() {
         if (undoStack.isEmpty()) return
         redoStack.add(_strokesByLayer.value.toMap())
-        val previous = undoStack.removeAt(undoStack.lastIndex)
-        _strokesByLayer.value = previous
+        _strokesByLayer.value = undoStack.removeAt(undoStack.lastIndex)
         updateUndoRedoState()
     }
 
     fun redo() {
         if (redoStack.isEmpty()) return
         undoStack.add(_strokesByLayer.value.toMap())
-        val next = redoStack.removeAt(redoStack.lastIndex)
-        _strokesByLayer.value = next
+        _strokesByLayer.value = redoStack.removeAt(redoStack.lastIndex)
         updateUndoRedoState()
     }
 
@@ -214,7 +208,7 @@ class CanvasEngine(
     fun removeLayer(layerId: String) {
         if (_layers.value.size <= 1) return
         pushUndoState()
-        _layers.update { it.filter { layer -> layer.id != layerId } }
+        _layers.update { it.filter { it.id != layerId } }
         _strokesByLayer.update { it - layerId }
         if (_activeLayerId.value == layerId) {
             _activeLayerId.value = _layers.value.last().id
@@ -222,19 +216,9 @@ class CanvasEngine(
         updateUndoRedoState()
     }
 
-    fun setLayerOpacity(layerId: String, opacity: Float) {
-        _layers.update { list ->
-            list.map {
-                if (it.id == layerId) it.copy(opacity = opacity.coerceIn(0f, 1f)) else it
-            }
-        }
-    }
-
     fun toggleLayerVisibility(layerId: String) {
         _layers.update { list ->
-            list.map {
-                if (it.id == layerId) it.copy(isVisible = !it.isVisible) else it
-            }
+            list.map { if (it.id == layerId) it.copy(isVisible = !it.isVisible) else it }
         }
     }
 
@@ -245,4 +229,29 @@ class CanvasEngine(
         redoStack.clear()
         updateUndoRedoState()
     }
+
+    // === Serialization helpers for Save/Load ===
+
+    fun getSerializableState(): EngineState {
+        return EngineState(
+            layers = _layers.value,
+            activeLayerId = _activeLayerId.value,
+            strokesByLayer = _strokesByLayer.value
+        )
+    }
+
+    fun loadState(state: EngineState) {
+        pushUndoState()
+        _layers.value = state.layers
+        _activeLayerId.value = state.activeLayerId
+        _strokesByLayer.value = state.strokesByLayer
+        redoStack.clear()
+        updateUndoRedoState()
+    }
+
+    data class EngineState(
+        val layers: List<Layer>,
+        val activeLayerId: String,
+        val strokesByLayer: Map<String, List<Stroke>>
+    )
 }

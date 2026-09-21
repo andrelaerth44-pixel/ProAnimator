@@ -1,42 +1,37 @@
-# Phase 1 — Progress
+# Phase 1 — COMPLETE
 
-## Latest completed
+## Final Feature Set
 
-### Eraser Tool
-- Tool mode: Draw / Eraser
-- Visual distinction for eraser strokes
-- Size control works for eraser too
-
-### Stroke Smoothing
-- Light moving-average smoothing applied on stroke end
-- Point filtering by distance to reduce noise
-
-### Tool Mode System
-- Clean switch between Draw and Eraser
-- UI adapts (hides color/brushes when in Eraser mode)
-
-### UI Polish
-- Better top bar with tool buttons
-- Clearer visual feedback
-
-## Full Phase 1 feature list so far
-
-- Multi-layer support (add, select, visibility, clear)
-- Multiple brushes
+### Drawing Engine
+- Multi-layer support (add, select, visibility toggle, clear)
+- Multiple brushes (Technical Pen, Soft Airbrush, Round, Sketch Pencil)
 - Color picker (9 colors)
-- Size slider
-- Undo / Redo (50 steps)
-- Eraser tool
-- Basic stroke smoothing
+- Size control (1–100px)
+- **Stabilization / Smoothing** slider (0–100%)
 - Real-time stroke preview
+- Point filtering + smoothing algorithm
 
-## Still missing / next
+### Tools
+- Draw mode
+- Eraser mode
+- Undo / Redo (50 steps)
 
-1. Real stylus pressure (MotionEvent)
-2. Proper eraser (destination-out with ImageBitmap)
-3. Project Save / Load
-4. Better performance with many strokes
+### Project Persistence
+- **Save** → JSON in internal storage
+- **Load** → restores layers + strokes
+- Ready to evolve into binary `.pan` format later
+
+### Architecture ready for next phases
+- Pressure field already in StrokePoint (ready for real stylus)
+- Modular engine
+- Clean separation of concerns
 
 ---
 
-**Status:** Drawing + Erasing experience is now solid for prototype.
+## Phase 1 Status: **DONE**
+
+Next → **Phase 2: Timeline + Flipbook + Keyframes + Perform mode**
+
+---
+
+You can now open the project in Android Studio, sync Gradle and run on a device/emulator.
