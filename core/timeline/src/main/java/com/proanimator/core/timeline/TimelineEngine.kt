@@ -38,13 +38,16 @@ class TimelineEngine(
     private val _tracks = MutableStateFlow<List<Track>>(listOf(Track(name = "Track 1")))
     val tracks: StateFlow<List<Track>> = _tracks.asStateFlow()
 
-    // Multiple animatable properties
     private val _properties = MutableStateFlow<Map<PropertyType, AnimatableProperty>>(emptyMap())
     val properties: StateFlow<Map<PropertyType, AnimatableProperty>> = _properties.asStateFlow()
 
-    // Perform mode recording
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
+    // Last recorded position (to avoid flooding keyframes)
+    private var lastRecordedFrame = -1
+    private var lastRecordedX = 0f
+    private var lastRecordedY = 0f
 
     fun setMode(mode: TimelineMode) {
         _mode.value = mode
@@ -70,14 +73,23 @@ class TimelineEngine(
     fun tick() {
         if (!_isPlaying.value) return
         val next = _currentFrame.value + 1
-        if (next > _durationFrames.value) seekTo(0) else seekTo(next)
+        if (next > _durationFrames.value) {
+            if (_isRecording.value) {
+                // Stop recording at the end
+                stopRecording()
+            } else {
+                seekTo(0)
+            }
+        } else {
+            seekTo(next)
+        }
     }
 
     fun addTrack(name: String = "Track ${_tracks.value.size + 1}") {
         _tracks.update { it + Track(name = name) }
     }
 
-    // ===== Keyframe API (expanded) =====
+    // ===== Keyframe API =====
 
     fun addOrUpdateKeyframe(
         type: PropertyType,
@@ -109,10 +121,10 @@ class TimelineEngine(
     // ===== Perform mode =====
 
     fun startRecording() {
-        if (_mode.value == TimelineMode.PERFORM) {
-            _isRecording.value = true
-            play()
-        }
+        if (_mode.value != TimelineMode.PERFORM) return
+        _isRecording.value = true
+        lastRecordedFrame = -1
+        play()
     }
 
     fun stopRecording() {
@@ -124,9 +136,30 @@ class TimelineEngine(
         if (_isRecording.value) stopRecording() else startRecording()
     }
 
-    /** Called during Perform mode when user moves something */
-    fun recordProperty(type: PropertyType, value: Float) {
+    /**
+     * Called on every drag movement while recording.
+     * Creates Position X/Y keyframes with Linear easing for natural performance feel.
+     */
+    fun recordPosition(x: Float, y: Float) {
         if (!_isRecording.value) return
-        addOrUpdateKeyframe(type, _currentFrame.value, value, EasingType.LINEAR)
+
+        val frame = _currentFrame.value
+
+        // Throttle: only record if frame changed or significant movement
+        val dx = x - lastRecordedX
+        val dy = y - lastRecordedY
+        val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+
+        if (frame != lastRecordedFrame || dist > 4f) {
+            addOrUpdateKeyframe(PropertyType.POSITION_X, frame, x, EasingType.LINEAR)
+            addOrUpdateKeyframe(PropertyType.POSITION_Y, frame, y, EasingType.LINEAR)
+            lastRecordedFrame = frame
+            lastRecordedX = x
+            lastRecordedY = y
+        }
+    }
+
+    fun clearAllKeyframes() {
+        _properties.value = emptyMap()
     }
 }

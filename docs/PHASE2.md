@@ -1,52 +1,46 @@
-# Phase 2 — Current Status
+# Phase 2 — Status Atual
 
-## Completed
+## Perform Mode (NOVO)
 
-### Classic Onion Skin Colors
-- Previous frames → **Red / Orange** tones
-- Next frames → **Green / Cyan** tones
-- Opacity falloff by distance
+Agora o Perform mode captura movimento real:
 
-### Expanded Keyframe Properties
-- `OPACITY`
-- `POSITION_X` / `POSITION_Y`
-- `SCALE`
-- `ROTATION`
-- All with full interpolation (Linear, EaseIn, EaseOut, EaseInOut, Hold)
+1. Mude para o modo **Perform**
+2. Aperte **Rec**
+3. Arraste o dedo/stylus pela tela enquanto a timeline toca
+4. Os movimentos são gravados como keyframes de **Position X** e **Position Y** (easing Linear)
+5. Aperte **Stop** ou deixe chegar ao final
 
-### Perform Mode Foundation
-- Recording state (`isRecording`)
-- Start / Stop recording
-- `recordProperty()` API ready to capture live values while playing
+Quando você der Play depois, o conteúdo se move seguindo o caminho que você performou.
 
-### Flipbook + Timeline
-- Flipbook fully functional
-- Frame strip + controls
-- Strokes go directly into current Flipbook frame
+## Transforms visuais
 
-## How to test
+- Opacity, Scale, Rotation e Position já são aplicados no canvas via `withTransform`
+- Você vê o resultado em tempo real ao dar Play
 
-**Onion Skin**
-1. Draw on frame 1
-2. Add frame and draw something else
-3. Turn Onion ON → previous = red, next = green
+## Onion Skin clássico
+- Anterior = tons de vermelho/laranja
+- Próximo = tons de verde/ciano
 
-**Keyframes**
-1. Switch to Keyframe mode
-2. Use +Op / Op0 / +Sc / +Rot at different frames
-3. Play and watch values change
+## Resumo do que a Phase 2 já entrega
 
-**Perform**
-1. Switch to Perform mode
-2. Press Rec → it starts playing + recording
-3. (Next step: actually capture drag gestures into keyframes)
+| Feature                    | Status      |
+|---------------------------|-------------|
+| Timeline + Playhead       | ✅          |
+| Modos Compose/Keyframe/Perform | ✅     |
+| Flipbook + frames         | ✅          |
+| Onion Skin colorido       | ✅          |
+| Keyframes (Op, Pos, Scale, Rot) | ✅   |
+| Interpolação (Linear + Eases) | ✅     |
+| Perform captura movimento | ✅          |
+| Transforms visuais        | ✅ Básico   |
 
-## Next remaining pieces
-- Make Perform mode capture real touch movement into Position keyframes
-- Visual keyframes on the timeline tracks
-- Apply Scale / Rotation / Position visually on the canvas content
-- Better content-to-track binding
+## Próximos refinamentos
+
+- Keyframes visuais na timeline (marcadores)
+- Melhor pivot de Scale/Rotation
+- Perform também para Scale/Rotation/Opacity
+- Ligação mais forte Content ↔ Track
 
 ---
 
-**Phase 2 is now very solid.**
+**Phase 2 está muito avançada.**

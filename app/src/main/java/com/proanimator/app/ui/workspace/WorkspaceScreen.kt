@@ -17,11 +17,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -34,7 +36,6 @@ import com.proanimator.core.fileformat.ProjectSerializer
 import com.proanimator.core.timeline.FlipbookEngine
 import com.proanimator.core.timeline.TimelineEngine
 import com.proanimator.core.timeline.TimelineMode
-import com.proanimator.domain.model.EasingType
 import com.proanimator.domain.model.PropertyType
 import com.proanimator.domain.model.Stroke
 import com.proanimator.domain.model.StrokePoint
@@ -64,7 +65,6 @@ fun WorkspaceScreen() {
     val flipbook by flipbookEngine.flipbook.collectAsState()
     val flipbookFrameIndex by flipbookEngine.currentFrameIndex.collectAsState()
 
-    // Live property values
     val opacity by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.OPACITY, currentFrame) } }
     val posX by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.POSITION_X, currentFrame) } }
     val posY by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.POSITION_Y, currentFrame) } }
@@ -86,14 +86,17 @@ fun WorkspaceScreen() {
 
         // TOP BAR
         Row(
-            modifier = Modifier.fillMaxWidth().height(42.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
+            modifier = Modifier.fillMaxWidth().height(40.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ToolButton("Draw", selected = toolMode == ToolMode.DRAW) { canvasEngine.setToolMode(ToolMode.DRAW) }
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                ToolButton("Draw", selected = toolMode == ToolMode.DRAW && timelineMode != TimelineMode.PERFORM) {
+                    canvasEngine.setToolMode(ToolMode.DRAW)
+                    if (timelineMode == TimelineMode.PERFORM) timeline.setMode(TimelineMode.COMPOSE)
+                }
                 ToolButton("Eraser", selected = toolMode == ToolMode.ERASE) { canvasEngine.setToolMode(ToolMode.ERASE) }
                 ToolButton("Undo", enabled = canUndo) { canvasEngine.undo() }
                 ToolButton("Redo", enabled = canRedo) { canvasEngine.redo() }
@@ -112,68 +115,104 @@ fun WorkspaceScreen() {
             LaunchedEffect(it) { delay(1400); statusMessage = null }
         }
 
-        // TOOLS
-        Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(vertical = 4.dp)) {
-            if (toolMode == ToolMode.DRAW) {
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    DefaultBrushes.all.forEach { brush ->
-                        val sel = currentBrushId == brush.id
-                        Box(modifier = Modifier.clip(RoundedCornerShape(4.dp))
-                            .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF333333))
-                            .clickable { canvasEngine.setBrush(brush.id); canvasEngine.setSize(brush.defaultSize) }
-                            .padding(horizontal = 7.dp, vertical = 4.dp)) {
-                            Text(brush.name, color = Color.White, fontSize = 9.sp)
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(3.dp))
-            }
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // TOOLS (hidden in pure Perform recording for cleaner UX)
+        if (timelineMode != TimelineMode.PERFORM || !isRecording) {
+            Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(vertical = 4.dp)) {
                 if (toolMode == ToolMode.DRAW) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        colors.forEach { c ->
-                            val sel = currentColor == c
-                            Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(Color(c))
-                                .border(if (sel) 2.dp else 1.dp, if (sel) Color.White else Color.Gray, CircleShape)
-                                .clickable { canvasEngine.setColor(c) })
+                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        DefaultBrushes.all.forEach { brush ->
+                            val sel = currentBrushId == brush.id
+                            Box(modifier = Modifier.clip(RoundedCornerShape(4.dp))
+                                .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF333333))
+                                .clickable { canvasEngine.setBrush(brush.id); canvasEngine.setSize(brush.defaultSize) }
+                                .padding(horizontal = 7.dp, vertical = 4.dp)) {
+                                Text(brush.name, color = Color.White, fontSize = 9.sp)
+                            }
                         }
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                 }
-                Text("Size", color = Color.LightGray, fontSize = 9.sp)
-                Slider(value = currentSize, onValueChange = { canvasEngine.setSize(it) }, valueRange = 1f..50f,
-                    modifier = Modifier.width(80.dp),
-                    colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF)))
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (toolMode == ToolMode.DRAW) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            colors.forEach { c ->
+                                val sel = currentColor == c
+                                Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(Color(c))
+                                    .border(if (sel) 2.dp else 1.dp, if (sel) Color.White else Color.Gray, CircleShape)
+                                    .clickable { canvasEngine.setColor(c) })
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text("Size", color = Color.LightGray, fontSize = 9.sp)
+                    Slider(value = currentSize, onValueChange = { canvasEngine.setSize(it) }, valueRange = 1f..50f,
+                        modifier = Modifier.width(80.dp),
+                        colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF)))
+                }
             }
         }
 
         // CANVAS
         Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF2C2C2C))) {
-            Canvas(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { o -> canvasEngine.startStroke(StrokePoint(o.x, o.y, 1f)) },
-                    onDrag = { c, _ -> canvasEngine.addPointToStroke(StrokePoint(c.position.x, c.position.y, 1f)) },
-                    onDragEnd = {
-                        val stroke = canvasEngine.endStroke()
-                        stroke?.let { flipbookEngine.addStrokeToCurrentFrame(it) }
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(timelineMode, isRecording, toolMode) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                if (timelineMode == TimelineMode.PERFORM && isRecording) {
+                                    // In Perform + Recording we capture position
+                                    timeline.recordPosition(offset.x, offset.y)
+                                } else {
+                                    canvasEngine.startStroke(StrokePoint(offset.x, offset.y, 1f))
+                                }
+                            },
+                            onDrag = { change, _ ->
+                                if (timelineMode == TimelineMode.PERFORM && isRecording) {
+                                    timeline.recordPosition(change.position.x, change.position.y)
+                                } else {
+                                    canvasEngine.addPointToStroke(
+                                        StrokePoint(change.position.x, change.position.y, 1f)
+                                    )
+                                }
+                            },
+                            onDragEnd = {
+                                if (!(timelineMode == TimelineMode.PERFORM && isRecording)) {
+                                    val stroke = canvasEngine.endStroke()
+                                    stroke?.let { flipbookEngine.addStrokeToCurrentFrame(it) }
+                                }
+                            }
+                        )
                     }
-                )
-            }) {
-                // Onion Skin with classic colors
-                flipbookEngine.getOnionSkinLayers().forEach { layer ->
-                    layer.strokes.forEach { stroke ->
-                        drawStrokeTinted(stroke, layer.color, layer.opacity)
+            ) {
+                // Apply transforms from keyframes
+                withTransform({
+                    // Center of canvas as pivot for now
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    translate(posX, posY)
+                    // Scale and rotate around center
+                    translate(cx, cy)
+                    rotate(rotation)
+                    scale(scale, scale)
+                    translate(-cx, -cy)
+                }) {
+                    // Onion Skin
+                    flipbookEngine.getOnionSkinLayers().forEach { layer ->
+                        layer.strokes.forEach { stroke ->
+                            drawStrokeTinted(stroke, layer.color, layer.opacity * opacity)
+                        }
+                    }
+
+                    // Current frame
+                    flipbookEngine.currentFrame?.strokes?.forEach { stroke ->
+                        drawStroke(stroke, opacity)
                     }
                 }
 
-                // Current frame
-                flipbookEngine.currentFrame?.strokes?.forEach { stroke ->
-                    drawStroke(stroke, 1f)
-                }
-
-                // Live stroke
-                if (currentStroke.size > 1) {
+                // Live stroke (not transformed while drawing)
+                if (currentStroke.size > 1 && !(timelineMode == TimelineMode.PERFORM && isRecording)) {
                     val path = Path().apply {
                         moveTo(currentStroke[0].x, currentStroke[0].y)
                         for (i in 1 until currentStroke.size) lineTo(currentStroke[i].x, currentStroke[i].y)
@@ -181,13 +220,22 @@ fun WorkspaceScreen() {
                     val col = if (toolMode == ToolMode.ERASE) Color.Gray.copy(0.4f) else Color(currentColor)
                     drawPath(path, col, style = Stroke(currentSize, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 }
+
+                // Visual indicator of recorded position while performing
+                if (timelineMode == TimelineMode.PERFORM && (posX != 0f || posY != 0f)) {
+                    drawCircle(Color.Red.copy(alpha = 0.6f), radius = 8f, center = Offset(posX, posY))
+                }
             }
 
-            // Info overlays
+            // Overlays
             Column(modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
                 Text("Frame ${flipbookFrameIndex + 1}/${flipbook.frameCount}", color = Color.White.copy(0.85f), fontSize = 12.sp)
                 if (timelineMode == TimelineMode.KEYFRAME || timelineMode == TimelineMode.PERFORM) {
-                    Text("Op:${(opacity*100).toInt()}%  S:${String.format("%.2f", scale)}  R:${rotation.toInt()}°", color = Color(0xFF03DAC6), fontSize = 10.sp)
+                    Text(
+                        "Op:${(opacity * 100).toInt()}%  XY:(${posX.toInt()},${posY.toInt()})  S:${String.format("%.2f", scale)}  R:${rotation.toInt()}°",
+                        color = Color(0xFF03DAC6),
+                        fontSize = 10.sp
+                    )
                 }
             }
 
@@ -200,15 +248,19 @@ fun WorkspaceScreen() {
             )
 
             if (isRecording) {
-                Text("● REC", color = Color.Red, fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp))
+                Text(
+                    "● REC - Drag to perform",
+                    color = Color.Red,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp)
+                )
             }
         }
 
-        // CONTROLS
+        // BOTTOM CONTROLS
         Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF111111))) {
 
-            // Mode + playback + keyframe actions
             Row(
                 modifier = Modifier.fillMaxWidth().height(34.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -228,36 +280,40 @@ fun WorkspaceScreen() {
 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (timelineMode == TimelineMode.KEYFRAME) {
-                        ToolButton("+Op") { timeline.addOrUpdateKeyframe(PropertyType.OPACITY, currentFrame, 1f); statusMessage = "Opacity KF" }
+                        ToolButton("+Op") { timeline.addOrUpdateKeyframe(PropertyType.OPACITY, currentFrame, 1f) }
                         ToolButton("Op0") { timeline.addOrUpdateKeyframe(PropertyType.OPACITY, currentFrame, 0f) }
-                        ToolButton("+Sc") { timeline.addOrUpdateKeyframe(PropertyType.SCALE, currentFrame, 1.5f); statusMessage = "Scale KF" }
-                        ToolButton("+Rot") { timeline.addOrUpdateKeyframe(PropertyType.ROTATION, currentFrame, 45f); statusMessage = "Rot KF" }
+                        ToolButton("+Sc") { timeline.addOrUpdateKeyframe(PropertyType.SCALE, currentFrame, 1.4f) }
+                        ToolButton("+Rot") { timeline.addOrUpdateKeyframe(PropertyType.ROTATION, currentFrame, 30f) }
                     }
+
                     if (timelineMode == TimelineMode.PERFORM) {
-                        ToolButton(if (isRecording) "Stop" else "Rec", selected = isRecording) { timeline.toggleRecording() }
+                        ToolButton(
+                            text = if (isRecording) "Stop" else "Rec",
+                            selected = isRecording
+                        ) { timeline.toggleRecording() }
+                        ToolButton("ClearKF") { timeline.clearAllKeyframes(); statusMessage = "Keyframes cleared" }
                     }
+
                     ToolButton(if (isPlaying) "||" else ">") { timeline.togglePlay() }
                 }
             }
 
-            // Flipbook controls + frame strip
+            // Flipbook strip
             Row(
-                modifier = Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 6.dp),
+                modifier = Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 ToolButton("|◀") { flipbookEngine.previousFrame() }
                 ToolButton("▶|") { flipbookEngine.nextFrame() }
                 ToolButton("+F") { flipbookEngine.addFrame() }
                 ToolButton("Dup") { flipbookEngine.duplicateCurrentFrame() }
-                ToolButton("Del") { flipbookEngine.deleteCurrentFrame() }
 
-                // Frame strip
                 Row(modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     flipbook.frames.forEachIndexed { index, _ ->
                         val isCurrent = index == flipbookFrameIndex
-                        Box(modifier = Modifier.width(28.dp).height(22.dp).clip(RoundedCornerShape(3.dp))
+                        Box(modifier = Modifier.width(26.dp).height(20.dp).clip(RoundedCornerShape(3.dp))
                             .background(if (isCurrent) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
                             .clickable { flipbookEngine.setCurrentFrame(index) },
                             contentAlignment = Alignment.Center) {
