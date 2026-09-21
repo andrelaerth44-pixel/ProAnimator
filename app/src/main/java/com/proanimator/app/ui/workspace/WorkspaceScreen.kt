@@ -33,6 +33,7 @@ import com.proanimator.core.brushes.DefaultBrushes
 import com.proanimator.core.engine.CanvasEngine
 import com.proanimator.core.engine.ToolMode
 import com.proanimator.core.fileformat.ProjectSerializer
+import com.proanimator.core.timeline.FlipbookEngine
 import com.proanimator.core.timeline.TimelineEngine
 import com.proanimator.core.timeline.TimelineMode
 import com.proanimator.domain.model.EasingType
@@ -46,9 +47,9 @@ fun WorkspaceScreen() {
     val context = LocalContext.current
     val canvasEngine = remember { CanvasEngine(width = 1920, height = 1080) }
     val timeline = remember { TimelineEngine() }
+    val flipbookEngine = remember { FlipbookEngine() }
 
     val layers by canvasEngine.layers.collectAsState()
-    val activeLayerId by canvasEngine.activeLayerId.collectAsState()
     val strokesByLayer by canvasEngine.strokesByLayer.collectAsState()
     val currentStroke by canvasEngine.currentStroke.collectAsState()
     val currentBrushId by canvasEngine.currentBrushId.collectAsState()
@@ -57,26 +58,32 @@ fun WorkspaceScreen() {
     val toolMode by canvasEngine.toolMode.collectAsState()
     val canUndo by canvasEngine.canUndo.collectAsState()
     val canRedo by canvasEngine.canRedo.collectAsState()
-    val stabilization by canvasEngine.stabilization.collectAsState()
 
     val currentFrame by timeline.currentFrame.collectAsState()
     val isPlaying by timeline.isPlaying.collectAsState()
     val durationFrames by timeline.durationFrames.collectAsState()
-    val fps by timeline.fps.collectAsState()
     val timelineMode by timeline.mode.collectAsState()
-    val tracks by timeline.tracks.collectAsState()
 
-    // Demo property for keyframe testing (opacity of a virtual object)
-    val demoOpacity by remember {
-        derivedStateOf { timeline.getPropertyValue("opacity", currentFrame) }
-    }
+    val flipbook by flipbookEngine.flipbook.collectAsState()
+    val flipbookFrameIndex by flipbookEngine.currentFrameIndex.collectAsState()
 
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(isPlaying, fps) {
+    // When in Flipbook-style workflow we sync timeline frame with flipbook frame
+    LaunchedEffect(timelineMode) {
+        if (timelineMode == TimelineMode.COMPOSE) {
+            // keep them independent for now
+        }
+    }
+
+    LaunchedEffect(isPlaying, timeline.fps.value) {
         while (isPlaying) {
-            delay((1000f / fps).toLong().coerceAtLeast(16))
+            delay((1000f / timeline.fps.value).toLong().coerceAtLeast(16))
             timeline.tick()
+            // Also advance flipbook when playing
+            if (timelineMode == TimelineMode.COMPOSE) {
+                // optional: flipbookEngine.setCurrentFrame(timeline.currentFrame.value % flipbook.frameCount)
+            }
         }
     }
 
@@ -89,7 +96,7 @@ fun WorkspaceScreen() {
 
         // TOP BAR
         Row(
-            modifier = Modifier.fillMaxWidth().height(46.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
+            modifier = Modifier.fillMaxWidth().height(44.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -106,25 +113,16 @@ fun WorkspaceScreen() {
                         statusMessage = "Saved"
                     } catch (e: Exception) { statusMessage = "Error" }
                 }
-                ToolButton("Load") {
-                    try {
-                        val f = File(context.filesDir, "project.json")
-                        if (f.exists()) {
-                            ProjectSerializer.fromJson(f.readText(), canvasEngine)
-                            statusMessage = "Loaded"
-                        } else statusMessage = "No save"
-                    } catch (e: Exception) { statusMessage = "Error" }
-                }
             }
         }
 
         statusMessage?.let {
             Text(it, color = Color(0xFF03DAC6), fontSize = 11.sp,
                 modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 2.dp))
-            LaunchedEffect(it) { delay(1600); statusMessage = null }
+            LaunchedEffect(it) { delay(1500); statusMessage = null }
         }
 
-        // TOOLS
+        // TOOLS BAR
         Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(vertical = 5.dp)) {
             if (toolMode == ToolMode.DRAW) {
                 Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
@@ -134,12 +132,12 @@ fun WorkspaceScreen() {
                         Box(modifier = Modifier.clip(RoundedCornerShape(5.dp))
                             .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF333333))
                             .clickable { canvasEngine.setBrush(brush.id); canvasEngine.setSize(brush.defaultSize) }
-                            .padding(horizontal = 9.dp, vertical = 5.dp)) {
+                            .padding(horizontal = 8.dp, vertical = 5.dp)) {
                             Text(brush.name, color = Color.White, fontSize = 10.sp)
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(5.dp))
+                Spacer(modifier = Modifier.height(4.dp))
             }
 
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -147,7 +145,7 @@ fun WorkspaceScreen() {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         colors.forEach { c ->
                             val sel = currentColor == c
-                            Box(modifier = Modifier.size(20.dp).clip(CircleShape).background(Color(c))
+                            Box(modifier = Modifier.size(18.dp).clip(CircleShape).background(Color(c))
                                 .border(if (sel) 2.dp else 1.dp, if (sel) Color.White else Color.Gray, CircleShape)
                                 .clickable { canvasEngine.setColor(c) })
                         }
@@ -155,147 +153,124 @@ fun WorkspaceScreen() {
                     Spacer(modifier = Modifier.width(8.dp))
                 }
                 Text("Size", color = Color.LightGray, fontSize = 10.sp)
-                Slider(value = currentSize, onValueChange = { canvasEngine.setSize(it) }, valueRange = 1f..70f,
+                Slider(value = currentSize, onValueChange = { canvasEngine.setSize(it) }, valueRange = 1f..60f,
                     modifier = Modifier.width(90.dp),
                     colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF)))
             }
         }
 
-        // CANVAS + LAYERS
-        Row(modifier = Modifier.weight(1f)) {
-            Box(modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFF2C2C2C))) {
-                Canvas(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { o -> canvasEngine.startStroke(StrokePoint(o.x, o.y, 1f)) },
-                        onDrag = { c, _ -> canvasEngine.addPointToStroke(StrokePoint(c.position.x, c.position.y, 1f)) },
-                        onDragEnd = { canvasEngine.endStroke() }
-                    )
-                }) {
-                    layers.forEach { layer ->
-                        if (!layer.isVisible) return@forEach
-                        (strokesByLayer[layer.id] ?: emptyList()).forEach { s -> drawStroke(s, layer.opacity) }
+        // CANVAS
+        Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF2C2C2C))) {
+            Canvas(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { o -> canvasEngine.startStroke(StrokePoint(o.x, o.y, 1f)) },
+                    onDrag = { c, _ -> canvasEngine.addPointToStroke(StrokePoint(c.position.x, c.position.y, 1f)) },
+                    onDragEnd = {
+                        val stroke = canvasEngine.endStroke()
+                        // Also add to current flipbook frame
+                        stroke?.let { flipbookEngine.addStrokeToCurrentFrame(it) }
                     }
-                    if (currentStroke.size > 1) {
-                        val path = Path().apply {
-                            moveTo(currentStroke[0].x, currentStroke[0].y)
-                            for (i in 1 until currentStroke.size) lineTo(currentStroke[i].x, currentStroke[i].y)
-                        }
-                        val col = if (toolMode == ToolMode.ERASE) Color.Gray.copy(0.4f) else Color(currentColor)
-                        drawPath(path, col, style = Stroke(currentSize, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                )
+            }) {
+                // 1. Onion Skin (previous + next frames)
+                flipbookEngine.getOnionSkinStrokes().forEach { (strokes, opacity) ->
+                    strokes.forEach { stroke ->
+                        drawStroke(stroke, opacity)
                     }
                 }
 
-                // Demo keyframe indicator
-                if (timelineMode == TimelineMode.KEYFRAME) {
-                    Text(
-                        text = "Opacity demo: ${(demoOpacity * 100).toInt()}%",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp,
-                        modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
-                    )
+                // 2. Current flipbook frame strokes
+                flipbookEngine.currentFrame?.strokes?.forEach { stroke ->
+                    drawStroke(stroke, 1f)
+                }
+
+                // 3. Live stroke being drawn
+                if (currentStroke.size > 1) {
+                    val path = Path().apply {
+                        moveTo(currentStroke[0].x, currentStroke[0].y)
+                        for (i in 1 until currentStroke.size) lineTo(currentStroke[i].x, currentStroke[i].y)
+                    }
+                    val col = if (toolMode == ToolMode.ERASE) Color.Gray.copy(0.4f) else Color(currentColor)
+                    drawPath(path, col, style = Stroke(currentSize, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 }
             }
 
-            Column(modifier = Modifier.width(120.dp).fillMaxHeight().background(Color(0xFF1A1A1A)).padding(5.dp)) {
-                Text("Layers", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-                layers.asReversed().forEach { layer ->
-                    val active = layer.id == activeLayerId
-                    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
-                        .background(if (active) Color(0xFF3A2A5A) else Color.Transparent)
-                        .clickable { canvasEngine.setActiveLayer(layer.id) }.padding(5.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(9.dp).clip(CircleShape)
-                            .background(if (layer.isVisible) Color(0xFF03DAC6) else Color.Gray)
-                            .clickable { canvasEngine.toggleLayerVisibility(layer.id) })
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(layer.name, color = if (active) Color.White else Color.LightGray, fontSize = 10.sp)
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(Color(0xFF333333))
-                    .clickable { canvasEngine.addLayer() }.padding(vertical = 7.dp), contentAlignment = Alignment.Center) {
-                    Text("+ Layer", color = Color.White, fontSize = 10.sp)
-                }
-            }
+            // Frame indicator
+            Text(
+                text = "Frame ${flipbookFrameIndex + 1} / ${flipbook.frameCount}",
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 13.sp,
+                modifier = Modifier.align(Alignment.TopStart).padding(10.dp)
+            )
+
+            // Onion skin toggle
+            Text(
+                text = if (flipbook.onionSkinEnabled) "Onion ON" else "Onion OFF",
+                color = if (flipbook.onionSkinEnabled) Color(0xFF03DAC6) else Color.Gray,
+                fontSize = 11.sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp)
+                    .clickable { flipbookEngine.setOnionSkinEnabled(!flipbook.onionSkinEnabled) }
+            )
         }
 
-        // === TIMELINE ===
-        Column(modifier = Modifier.fillMaxWidth().height(170.dp).background(Color(0xFF111111))) {
+        // === FLIPBOOK + TIMELINE CONTROLS ===
+        Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF111111))) {
 
-            // Controls
+            // Flipbook controls
             Row(
-                modifier = Modifier.fillMaxWidth().height(34.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
+                modifier = Modifier.fillMaxWidth().height(36.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    ToolButton("|◀") { flipbookEngine.previousFrame() }
+                    ToolButton("▶|") { flipbookEngine.nextFrame() }
+                    ToolButton("+Frame") { flipbookEngine.addFrame(); statusMessage = "Frame added" }
+                    ToolButton("Dup") { flipbookEngine.duplicateCurrentFrame(); statusMessage = "Duplicated" }
+                    ToolButton("Del") { flipbookEngine.deleteCurrentFrame() }
+                    ToolButton("Clear") { flipbookEngine.clearCurrentFrame() }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     TimelineMode.values().forEach { mode ->
                         val sel = timelineMode == mode
                         Box(modifier = Modifier.clip(RoundedCornerShape(4.dp))
                             .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
                             .clickable { timeline.setMode(mode) }
-                            .padding(horizontal = 7.dp, vertical = 3.dp)) {
-                            Text(mode.name.take(3), color = Color.White, fontSize = 10.sp)
+                            .padding(horizontal = 6.dp, vertical = 3.dp)) {
+                            Text(mode.name.take(3), color = Color.White, fontSize = 9.sp)
                         }
                     }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("$currentFrame / $durationFrames", color = Color.LightGray, fontSize = 10.sp)
-
-                    // Keyframe quick actions (only in Keyframe mode)
-                    if (timelineMode == TimelineMode.KEYFRAME) {
-                        ToolButton("+KF") {
-                            timeline.addOrUpdateKeyframe("opacity", currentFrame, 1f, EasingType.EASE_IN_OUT)
-                            statusMessage = "Keyframe added at $currentFrame"
-                        }
-                        ToolButton("KF 0") {
-                            timeline.addOrUpdateKeyframe("opacity", currentFrame, 0f, EasingType.EASE_IN_OUT)
-                            statusMessage = "Opacity 0 at $currentFrame"
-                        }
-                    }
-
                     ToolButton(if (isPlaying) "||" else ">") { timeline.togglePlay() }
-                    ToolButton("<") { timeline.previousFrame() }
-                    ToolButton(">") { timeline.nextFrame() }
                 }
             }
 
-            // Tracks area
-            Box(modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 3.dp)) {
-                Column {
-                    tracks.forEach { track ->
-                        Row(modifier = Modifier.fillMaxWidth().height(26.dp).padding(vertical = 1.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(track.name, color = Color.LightGray, fontSize = 9.sp, modifier = Modifier.width(60.dp))
-                            Box(modifier = Modifier.weight(1f).height(18.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF2A2A2A)))
-                        }
-                    }
-
-                    // Demo property track
-                    if (timelineMode == TimelineMode.KEYFRAME) {
-                        Row(modifier = Modifier.fillMaxWidth().height(26.dp).padding(vertical = 1.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("opacity", color = Color(0xFF03DAC6), fontSize = 9.sp, modifier = Modifier.width(60.dp))
-                            Box(modifier = Modifier.weight(1f).height(18.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF1E3A3A)))
-                        }
+            // Simple frame strip
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                flipbook.frames.forEachIndexed { index, _ ->
+                    val isCurrent = index == flipbookFrameIndex
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isCurrent) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
+                            .border(if (isCurrent) 2.dp else 0.dp, Color.White, RoundedCornerShape(4.dp))
+                            .clickable { flipbookEngine.setCurrentFrame(index) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("${index + 1}", color = Color.White, fontSize = 11.sp)
                     }
                 }
-
-                // Playhead
-                val fraction = if (durationFrames > 0) currentFrame.toFloat() / durationFrames else 0f
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val x = 60.dp.toPx() + (size.width - 60.dp.toPx()) * fraction
-                    drawLine(Color(0xFFFF5252), Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
-                }
-
-                Box(modifier = Modifier.fillMaxSize().padding(start = 60.dp).pointerInput(durationFrames) {
-                    detectTapGestures { offset ->
-                        val f = (offset.x / size.width).coerceIn(0f, 1f)
-                        timeline.seekTo((f * durationFrames).toInt())
-                    }
-                })
             }
         }
     }
@@ -313,15 +288,15 @@ private fun ToolButton(text: String, selected: Boolean = false, enabled: Boolean
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(stroke: Stroke, layerOpacity: Float) {
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(stroke: Stroke, opacity: Float) {
     if (stroke.points.size < 2) return
     val path = Path().apply {
         moveTo(stroke.points[0].x, stroke.points[0].y)
         for (i in 1 until stroke.points.size) lineTo(stroke.points[i].x, stroke.points[i].y)
     }
     if (stroke.brushId == "eraser") {
-        drawPath(path, Color.DarkGray.copy(alpha = 0.3f * layerOpacity), style = Stroke(stroke.size, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, Color.DarkGray.copy(alpha = 0.3f * opacity), style = Stroke(stroke.size, cap = StrokeCap.Round, join = StrokeJoin.Round))
     } else {
-        drawPath(path, Color(stroke.color).copy(alpha = layerOpacity * stroke.opacity), style = Stroke(stroke.size, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, Color(stroke.color).copy(alpha = opacity * stroke.opacity), style = Stroke(stroke.size, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
