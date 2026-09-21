@@ -1,45 +1,42 @@
 # Phase 1 — Progress
 
-## Completed in this iteration
+## Latest completed
 
-### Undo / Redo System
-- Full undo/redo stack (up to 50 states)
-- Buttons enabled/disabled based on availability
-- Works for strokes and clear layer
+### Eraser Tool
+- Tool mode: Draw / Eraser
+- Visual distinction for eraser strokes
+- Size control works for eraser too
 
-### Color Picker
-- 9 quick color swatches (White, Black, Red, Orange, Yellow, Green, Blue, Purple, Pink)
-- Visual selection indicator
+### Stroke Smoothing
+- Light moving-average smoothing applied on stroke end
+- Point filtering by distance to reduce noise
 
-### Size Control
-- Slider from 1px to 80px
-- Live size display
+### Tool Mode System
+- Clean switch between Draw and Eraser
+- UI adapts (hides color/brushes when in Eraser mode)
 
-### Engine improvements
-- Better state management
-- Undo stack is independent of layers
-- Clear layer now supports undo
+### UI Polish
+- Better top bar with tool buttons
+- Clearer visual feedback
 
-### UI
-- Top bar with Undo / Redo
-- Brush bar + Color swatches + Size slider
-- Layer panel fully functional
-- Multi-layer rendering working
+## Full Phase 1 feature list so far
 
-## Current usable features
-- Draw with multiple brushes
-- Change color and size
-- Multiple layers (add, select, hide, clear)
-- Undo / Redo
-- Real-time preview of current stroke
-
-## Still missing in Phase 1 (next)
-- Real stylus pressure (MotionEvent)
-- Stroke smoothing / stabilization
-- Project Save / Load (JSON)
+- Multi-layer support (add, select, visibility, clear)
+- Multiple brushes
+- Color picker (9 colors)
+- Size slider
+- Undo / Redo (50 steps)
 - Eraser tool
-- Better performance with many strokes (will move to ImageBitmap later)
+- Basic stroke smoothing
+- Real-time stroke preview
+
+## Still missing / next
+
+1. Real stylus pressure (MotionEvent)
+2. Proper eraser (destination-out with ImageBitmap)
+3. Project Save / Load
+4. Better performance with many strokes
 
 ---
 
-**Status:** The drawing experience is now solid for a Phase 1 prototype.
+**Status:** Drawing + Erasing experience is now solid for prototype.

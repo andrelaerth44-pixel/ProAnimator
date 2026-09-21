@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.proanimator.core.brushes.DefaultBrushes
 import com.proanimator.core.engine.CanvasEngine
+import com.proanimator.core.engine.ToolMode
 import com.proanimator.domain.model.Stroke
 import com.proanimator.domain.model.StrokePoint
 
@@ -56,19 +58,13 @@ fun WorkspaceScreen() {
     val currentBrushId by engine.currentBrushId.collectAsState()
     val currentSize by engine.currentSize.collectAsState()
     val currentColor by engine.currentColor.collectAsState()
+    val toolMode by engine.toolMode.collectAsState()
     val canUndo by engine.canUndo.collectAsState()
     val canRedo by engine.canRedo.collectAsState()
 
     val colors = listOf(
-        0xFFFFFFFF, // White
-        0xFF000000, // Black
-        0xFFFF5252, // Red
-        0xFFFF9800, // Orange
-        0xFFFFEB3B, // Yellow
-        0xFF4CAF50, // Green
-        0xFF2196F3, // Blue
-        0xFF9C27B0, // Purple
-        0xFFE91E63  // Pink
+        0xFFFFFFFF, 0xFF000000, 0xFFFF5252, 0xFFFF9800,
+        0xFFFFEB3B, 0xFF4CAF50, 0xFF2196F3, 0xFF9C27B0, 0xFFE91E63
     )
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -90,66 +86,68 @@ fun WorkspaceScreen() {
                 fontWeight = FontWeight.Bold
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Undo
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (canUndo) Color(0xFF333333) else Color(0xFF222222))
-                        .clickable(enabled = canUndo) { engine.undo() }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text("Undo", color = if (canUndo) Color.White else Color.Gray, fontSize = 13.sp)
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Tool mode buttons
+                ToolButton(
+                    text = "Draw",
+                    selected = toolMode == ToolMode.DRAW,
+                    onClick = { engine.setToolMode(ToolMode.DRAW) }
+                )
+                ToolButton(
+                    text = "Eraser",
+                    selected = toolMode == ToolMode.ERASE,
+                    onClick = { engine.setToolMode(ToolMode.ERASE) }
+                )
 
-                // Redo
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (canRedo) Color(0xFF333333) else Color(0xFF222222))
-                        .clickable(enabled = canRedo) { engine.redo() }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text("Redo", color = if (canRedo) Color.White else Color.Gray, fontSize = 13.sp)
-                }
+                Spacer(modifier = Modifier.width(8.dp))
+
+                ToolButton(
+                    text = "Undo",
+                    enabled = canUndo,
+                    onClick = { engine.undo() }
+                )
+                ToolButton(
+                    text = "Redo",
+                    enabled = canRedo,
+                    onClick = { engine.redo() }
+                )
             }
         }
 
-        // === BRUSH + COLOR + SIZE BAR ===
+        // === TOOLS BAR ===
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF222222))
                 .padding(vertical = 8.dp)
         ) {
-            // Brushes
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                DefaultBrushes.all.forEach { brush ->
-                    val isSelected = currentBrushId == brush.id
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) Color(0xFF7C4DFF) else Color(0xFF333333))
-                            .clickable {
-                                engine.setBrush(brush.id)
-                                engine.setSize(brush.defaultSize)
-                            }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Text(text = brush.name, color = Color.White, fontSize = 12.sp)
+            // Brushes (only when in Draw mode)
+            if (toolMode == ToolMode.DRAW) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DefaultBrushes.all.forEach { brush ->
+                        val isSelected = currentBrushId == brush.id
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) Color(0xFF7C4DFF) else Color(0xFF333333))
+                                .clickable {
+                                    engine.setBrush(brush.id)
+                                    engine.setSize(brush.defaultSize)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text(brush.name, color = Color.White, fontSize = 12.sp)
+                        }
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
 
             // Colors + Size
             Row(
@@ -158,34 +156,37 @@ fun WorkspaceScreen() {
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Color swatches
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    colors.forEach { colorLong ->
-                        val isSelected = currentColor == colorLong
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(Color(colorLong))
-                                .border(
-                                    width = if (isSelected) 3.dp else 1.dp,
-                                    color = if (isSelected) Color.White else Color.Gray,
-                                    shape = CircleShape
-                                )
-                                .clickable { engine.setColor(colorLong) }
-                        )
+                if (toolMode == ToolMode.DRAW) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        colors.forEach { colorLong ->
+                            val isSelected = currentColor == colorLong
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(colorLong))
+                                    .border(
+                                        width = if (isSelected) 3.dp else 1.dp,
+                                        color = if (isSelected) Color.White else Color.Gray,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { engine.setColor(colorLong) }
+                            )
+                        }
                     }
+                    Spacer(modifier = Modifier.width(16.dp))
                 }
 
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // Size slider
-                Text("Size", color = Color.LightGray, fontSize = 12.sp)
+                Text(
+                    text = if (toolMode == ToolMode.ERASE) "Eraser Size" else "Size",
+                    color = Color.LightGray,
+                    fontSize = 12.sp
+                )
                 Spacer(modifier = Modifier.width(8.dp))
                 Slider(
                     value = currentSize,
                     onValueChange = { engine.setSize(it) },
-                    valueRange = 1f..80f,
+                    valueRange = 1f..100f,
                     modifier = Modifier.width(140.dp),
                     colors = SliderDefaults.colors(
                         thumbColor = Color(0xFFBB86FC),
@@ -195,8 +196,7 @@ fun WorkspaceScreen() {
                 Text(
                     text = "${currentSize.toInt()}",
                     color = Color.White,
-                    fontSize = 12.sp,
-                    modifier = Modifier.width(28.dp)
+                    fontSize = 12.sp
                 )
             }
         }
@@ -204,7 +204,6 @@ fun WorkspaceScreen() {
         // === MAIN AREA ===
         Row(modifier = Modifier.weight(1f)) {
 
-            // Canvas
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -226,7 +225,7 @@ fun WorkspaceScreen() {
                                         StrokePoint(
                                             x = change.position.x,
                                             y = change.position.y,
-                                            pressure = 1f // real pressure later
+                                            pressure = 1f
                                         )
                                     )
                                 },
@@ -234,7 +233,6 @@ fun WorkspaceScreen() {
                             )
                         }
                 ) {
-                    // Draw committed strokes
                     layers.forEach { layer ->
                         if (!layer.isVisible) return@forEach
                         val strokes = strokesByLayer[layer.id] ?: emptyList()
@@ -243,16 +241,23 @@ fun WorkspaceScreen() {
                         }
                     }
 
-                    // Current stroke
+                    // Current stroke preview
                     if (currentStroke.size > 1) {
                         val path = Path()
                         path.moveTo(currentStroke[0].x, currentStroke[0].y)
                         for (i in 1 until currentStroke.size) {
                             path.lineTo(currentStroke[i].x, currentStroke[i].y)
                         }
+
+                        val previewColor = if (toolMode == ToolMode.ERASE) {
+                            Color.Gray.copy(alpha = 0.5f)
+                        } else {
+                            Color(currentColor)
+                        }
+
                         drawPath(
                             path = path,
-                            color = Color(currentColor),
+                            color = previewColor,
                             style = Stroke(
                                 width = currentSize,
                                 cap = StrokeCap.Round,
@@ -264,14 +269,14 @@ fun WorkspaceScreen() {
 
                 if (strokesByLayer.values.all { it.isEmpty() } && currentStroke.isEmpty()) {
                     Text(
-                        text = "Draw with finger or stylus",
+                        text = "Draw or Erase",
                         color = Color.Gray,
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
             }
 
-            // === LAYER PANEL ===
+            // Layer Panel
             Column(
                 modifier = Modifier
                     .width(150.dp)
@@ -289,7 +294,6 @@ fun WorkspaceScreen() {
 
                 layers.asReversed().forEach { layer ->
                     val isActive = layer.id == activeLayerId
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -345,20 +349,44 @@ fun WorkspaceScreen() {
             }
         }
 
-        // === BOTTOM ===
+        // Bottom
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(90.dp)
+                .height(80.dp)
                 .background(Color(0xFF141414)),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = "Timeline · Phase 2",
-                color = Color.Gray,
-                fontSize = 14.sp
-            )
+            Text("Timeline · Phase 2", color = Color.Gray, fontSize = 14.sp)
         }
+    }
+}
+
+@Composable
+private fun ToolButton(
+    text: String,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                when {
+                    selected -> Color(0xFF7C4DFF)
+                    enabled -> Color(0xFF333333)
+                    else -> Color(0xFF222222)
+                }
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = text,
+            color = if (enabled) Color.White else Color.Gray,
+            fontSize = 13.sp
+        )
     }
 }
 
@@ -374,15 +402,30 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(
         path.lineTo(stroke.points[i].x, stroke.points[i].y)
     }
 
-    val color = Color(stroke.color).copy(alpha = layerOpacity * stroke.opacity)
+    val isEraser = stroke.brushId == "eraser"
 
-    drawPath(
-        path = path,
-        color = color,
-        style = Stroke(
-            width = stroke.size,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round
+    if (isEraser) {
+        // Simple visual for eraser strokes (gray semi-transparent for now)
+        // Later we will use proper destination-out blending with ImageBitmap
+        drawPath(
+            path = path,
+            color = Color.DarkGray.copy(alpha = 0.35f * layerOpacity),
+            style = Stroke(
+                width = stroke.size,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
         )
-    )
+    } else {
+        val color = Color(stroke.color).copy(alpha = layerOpacity * stroke.opacity)
+        drawPath(
+            path = path,
+            color = color,
+            style = Stroke(
+                width = stroke.size,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
+        )
+    }
 }
