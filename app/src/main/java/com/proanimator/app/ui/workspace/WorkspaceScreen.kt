@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -32,6 +33,9 @@ import androidx.compose.ui.unit.sp
 import com.proanimator.core.brushes.DefaultBrushes
 import com.proanimator.core.engine.CanvasEngine
 import com.proanimator.core.engine.ToolMode
+import com.proanimator.core.export.ExportEngine
+import com.proanimator.core.export.ExportProgress
+import com.proanimator.core.export.ExportSettings
 import com.proanimator.core.fileformat.ProjectSerializer
 import com.proanimator.core.timeline.FlipbookEngine
 import com.proanimator.core.timeline.TimelineEngine
@@ -40,14 +44,17 @@ import com.proanimator.domain.model.PropertyType
 import com.proanimator.domain.model.Stroke
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
 fun WorkspaceScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val canvasEngine = remember { CanvasEngine(width = 1920, height = 1080) }
     val timeline = remember { TimelineEngine() }
     val flipbookEngine = remember { FlipbookEngine() }
+    val exportEngine = remember { ExportEngine(context) }
 
     val currentStroke by canvasEngine.currentStroke.collectAsState()
     val currentBrushId by canvasEngine.currentBrushId.collectAsState()
@@ -74,6 +81,8 @@ fun WorkspaceScreen() {
     val rotation by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.ROTATION, currentFrame) } }
 
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var isExporting by remember { mutableStateOf(false) }
+    var exportProgress by remember { mutableStateOf<ExportProgress?>(null) }
 
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
@@ -84,20 +93,66 @@ fun WorkspaceScreen() {
 
     val colors = listOf(0xFFFFFFFF, 0xFF000000, 0xFFFF5252, 0xFFFF9800, 0xFFFFEB3B, 0xFF4CAF50, 0xFF2196F3, 0xFF9C27B0, 0xFFE91E63)
 
-    // Property track colors for visual keyframes
     val propColors = mapOf(
         PropertyType.OPACITY to Color(0xFF80CBC4),
         PropertyType.POSITION_X to Color(0xFF90CAF9),
-        PropertyType.POSITION_Y to Color(0xFF90CAF9),
         PropertyType.SCALE to Color(0xFFFFCC80),
         PropertyType.ROTATION to Color(0xFFCE93D8)
     )
+
+    fun doExportPngSequence() {
+        if (isExporting) return
+        isExporting = true
+        statusMessage = "Exporting..."
+
+        scope.launch {
+            val settings = ExportSettings(
+                width = 1920,
+                height = 1080,
+                fps = timeline.fps.value,
+                transparentBackground = true,
+                startFrame = 0,
+                endFrame = (flipbook.frameCount - 1).coerceAtLeast(0)
+            )
+
+            val result = exportEngine.exportPngSequence(
+                settings = settings,
+                framesProvider = { frameIndex ->
+                    flipbook.frames.getOrNull(frameIndex)?.strokes ?: emptyList()
+                },
+                onProgress = { progress ->
+                    exportProgress = progress
+                }
+            )
+
+            isExporting = false
+            exportProgress = null
+
+            result.onSuccess { dir ->
+                statusMessage = "Exported to ${dir.name}"
+            }.onFailure {
+                statusMessage = "Export failed"
+            }
+        }
+    }
+
+    fun doExportCurrentFrame() {
+        scope.launch {
+            val strokes = flipbookEngine.currentFrame?.strokes ?: emptyList()
+            val result = exportEngine.exportCurrentFrameAsPng(strokes)
+            result.onSuccess {
+                statusMessage = "Frame saved"
+            }.onFailure {
+                statusMessage = "Export failed"
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
 
         // TOP BAR
         Row(
-            modifier = Modifier.fillMaxWidth().height(38.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
+            modifier = Modifier.fillMaxWidth().height(38.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -117,13 +172,28 @@ fun WorkspaceScreen() {
                         statusMessage = "Saved"
                     } catch (e: Exception) { statusMessage = "Error" }
                 }
+                ToolButton("Export") { doExportPngSequence() }
+                ToolButton("Frame") { doExportCurrentFrame() }
             }
         }
 
-        statusMessage?.let {
-            Text(it, color = Color(0xFF03DAC6), fontSize = 10.sp,
-                modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 2.dp))
-            LaunchedEffect(it) { delay(1300); statusMessage = null }
+        // Status / Progress
+        if (isExporting && exportProgress != null) {
+            Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                Text(exportProgress!!.message, color = Color(0xFF03DAC6), fontSize = 10.sp)
+                LinearProgressIndicator(
+                    progress = { exportProgress!!.currentFrame.toFloat() / exportProgress!!.totalFrames },
+                    modifier = Modifier.fillMaxWidth().height(3.dp),
+                    color = Color(0xFF7C4DFF),
+                    trackColor = Color(0xFF333333)
+                )
+            }
+        } else {
+            statusMessage?.let {
+                Text(it, color = Color(0xFF03DAC6), fontSize = 10.sp,
+                    modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 2.dp))
+                LaunchedEffect(it) { delay(1800); statusMessage = null }
+            }
         }
 
         // TOOLS
@@ -198,27 +268,22 @@ fun WorkspaceScreen() {
                 val cy = size.height / 2f
 
                 withTransform({
-                    // Better pivot: translate first, then scale/rotate around content center
                     translate(posX, posY)
                     translate(cx, cy)
                     rotate(rotation)
                     scale(scale, scale)
                     translate(-cx, -cy)
                 }) {
-                    // Onion Skin
                     flipbookEngine.getOnionSkinLayers().forEach { layer ->
                         layer.strokes.forEach { stroke ->
                             drawStrokeTinted(stroke, layer.color, layer.opacity * opacity)
                         }
                     }
-
-                    // Current frame
                     flipbookEngine.currentFrame?.strokes?.forEach { stroke ->
                         drawStroke(stroke, opacity)
                     }
                 }
 
-                // Live stroke
                 if (currentStroke.size > 1 && !(timelineMode == TimelineMode.PERFORM && isRecording)) {
                     val path = Path().apply {
                         moveTo(currentStroke[0].x, currentStroke[0].y)
@@ -228,7 +293,6 @@ fun WorkspaceScreen() {
                     drawPath(path, col, style = Stroke(currentSize, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 }
 
-                // Position indicator
                 if (timelineMode == TimelineMode.PERFORM || (posX != 0f || posY != 0f)) {
                     drawCircle(Color.Red.copy(alpha = 0.7f), radius = 6f, center = Offset(cx + posX, cy + posY))
                 }
@@ -237,10 +301,8 @@ fun WorkspaceScreen() {
             Column(modifier = Modifier.align(Alignment.TopStart).padding(6.dp)) {
                 Text("F ${flipbookFrameIndex + 1}/${flipbook.frameCount}", color = Color.White.copy(0.85f), fontSize = 11.sp)
                 if (timelineMode == TimelineMode.KEYFRAME || timelineMode == TimelineMode.PERFORM) {
-                    Text(
-                        "Op:${(opacity*100).toInt()}% XY:(${posX.toInt()},${posY.toInt()}) S:${String.format("%.2f", scale)} R:${rotation.toInt()}°",
-                        color = Color(0xFF03DAC6), fontSize = 9.sp
-                    )
+                    Text("Op:${(opacity*100).toInt()}% XY:(${posX.toInt()},${posY.toInt()}) S:${String.format("%.2f", scale)} R:${rotation.toInt()}°",
+                        color = Color(0xFF03DAC6), fontSize = 9.sp)
                 }
             }
 
@@ -258,12 +320,11 @@ fun WorkspaceScreen() {
             }
         }
 
-        // === TIMELINE WITH VISUAL KEYFRAMES ===
+        // TIMELINE
         Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF0D0D0D))) {
 
-            // Mode + actions
             Row(
-                modifier = Modifier.fillMaxWidth().height(32.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
+                modifier = Modifier.fillMaxWidth().height(30.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -295,49 +356,26 @@ fun WorkspaceScreen() {
                 }
             }
 
-            // Property tracks with visual keyframes
+            // Visual keyframe tracks
             if (timelineMode == TimelineMode.KEYFRAME || timelineMode == TimelineMode.PERFORM) {
-                val activeProps = listOf(
-                    PropertyType.OPACITY,
-                    PropertyType.POSITION_X,
-                    PropertyType.SCALE,
-                    PropertyType.ROTATION
-                )
-
+                val activeProps = listOf(PropertyType.OPACITY, PropertyType.POSITION_X, PropertyType.SCALE, PropertyType.ROTATION)
                 Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
                     activeProps.forEach { prop ->
                         val kfs = properties[prop]?.keyframes ?: emptyList()
                         val trackColor = propColors[prop] ?: Color.Gray
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth().height(18.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                prop.name.take(3),
-                                color = trackColor,
-                                fontSize = 8.sp,
-                                modifier = Modifier.width(28.dp)
-                            )
-
-                            Box(modifier = Modifier.weight(1f).height(14.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF1E1E1E))) {
+                        Row(modifier = Modifier.fillMaxWidth().height(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(prop.name.take(3), color = trackColor, fontSize = 8.sp, modifier = Modifier.width(26.dp))
+                            Box(modifier = Modifier.weight(1f).height(12.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF1E1E1E))) {
                                 Canvas(modifier = Modifier.fillMaxSize()) {
                                     val w = size.width
-                                    // Draw keyframe diamonds
                                     kfs.forEach { kf ->
                                         val x = if (durationFrames > 0) (kf.frame.toFloat() / durationFrames) * w else 0f
                                         val y = size.height / 2f
-                                        // Diamond shape
                                         val path = Path().apply {
-                                            moveTo(x, y - 4f)
-                                            lineTo(x + 4f, y)
-                                            lineTo(x, y + 4f)
-                                            lineTo(x - 4f, y)
-                                            close()
+                                            moveTo(x, y - 3.5f); lineTo(x + 3.5f, y); lineTo(x, y + 3.5f); lineTo(x - 3.5f, y); close()
                                         }
                                         drawPath(path, trackColor)
                                     }
-                                    // Playhead
                                     val px = if (durationFrames > 0) (currentFrame.toFloat() / durationFrames) * w else 0f
                                     drawLine(Color(0xFFFF5252), Offset(px, 0f), Offset(px, size.height), strokeWidth = 1.5f)
                                 }
@@ -349,7 +387,7 @@ fun WorkspaceScreen() {
 
             // Flipbook strip
             Row(
-                modifier = Modifier.fillMaxWidth().height(28.dp).padding(horizontal = 6.dp),
+                modifier = Modifier.fillMaxWidth().height(26.dp).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
@@ -362,7 +400,7 @@ fun WorkspaceScreen() {
                     horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     flipbook.frames.forEachIndexed { index, _ ->
                         val isCurrent = index == flipbookFrameIndex
-                        Box(modifier = Modifier.width(24.dp).height(18.dp).clip(RoundedCornerShape(2.dp))
+                        Box(modifier = Modifier.width(22.dp).height(16.dp).clip(RoundedCornerShape(2.dp))
                             .background(if (isCurrent) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
                             .clickable { flipbookEngine.setCurrentFrame(index) },
                             contentAlignment = Alignment.Center) {
