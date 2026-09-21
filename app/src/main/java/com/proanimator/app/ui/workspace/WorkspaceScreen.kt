@@ -1,6 +1,5 @@
 package com.proanimator.app.ui.workspace
 
-import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,6 +35,7 @@ import com.proanimator.core.engine.ToolMode
 import com.proanimator.core.fileformat.ProjectSerializer
 import com.proanimator.core.timeline.TimelineEngine
 import com.proanimator.core.timeline.TimelineMode
+import com.proanimator.domain.model.EasingType
 import com.proanimator.domain.model.Stroke
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.delay
@@ -66,9 +66,13 @@ fun WorkspaceScreen() {
     val timelineMode by timeline.mode.collectAsState()
     val tracks by timeline.tracks.collectAsState()
 
+    // Demo property for keyframe testing (opacity of a virtual object)
+    val demoOpacity by remember {
+        derivedStateOf { timeline.getPropertyValue("opacity", currentFrame) }
+    }
+
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    // Simple playback ticker
     LaunchedEffect(isPlaying, fps) {
         while (isPlaying) {
             delay((1000f / fps).toLong().coerceAtLeast(16))
@@ -83,224 +87,213 @@ fun WorkspaceScreen() {
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // === TOP BAR ===
+        // TOP BAR
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .background(Color(0xFF1A1A1A))
-                .padding(horizontal = 10.dp),
+            modifier = Modifier.fillMaxWidth().height(46.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 15.sp, fontWeight = FontWeight.Bold)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ToolButton("Draw", selected = toolMode == ToolMode.DRAW) { canvasEngine.setToolMode(ToolMode.DRAW) }
                 ToolButton("Eraser", selected = toolMode == ToolMode.ERASE) { canvasEngine.setToolMode(ToolMode.ERASE) }
                 ToolButton("Undo", enabled = canUndo) { canvasEngine.undo() }
                 ToolButton("Redo", enabled = canRedo) { canvasEngine.redo() }
                 ToolButton("Save") {
                     try {
-                        val json = ProjectSerializer.toJson(canvasEngine)
-                        File(context.filesDir, "project.json").writeText(json)
+                        File(context.filesDir, "project.json").writeText(ProjectSerializer.toJson(canvasEngine))
                         statusMessage = "Saved"
-                    } catch (e: Exception) { statusMessage = "Save error" }
+                    } catch (e: Exception) { statusMessage = "Error" }
                 }
                 ToolButton("Load") {
                     try {
-                        val file = File(context.filesDir, "project.json")
-                        if (file.exists()) {
-                            ProjectSerializer.fromJson(file.readText(), canvasEngine)
+                        val f = File(context.filesDir, "project.json")
+                        if (f.exists()) {
+                            ProjectSerializer.fromJson(f.readText(), canvasEngine)
                             statusMessage = "Loaded"
                         } else statusMessage = "No save"
-                    } catch (e: Exception) { statusMessage = "Load error" }
+                    } catch (e: Exception) { statusMessage = "Error" }
                 }
             }
         }
 
         statusMessage?.let {
             Text(it, color = Color(0xFF03DAC6), fontSize = 11.sp,
-                modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 12.dp, vertical = 3.dp))
-            LaunchedEffect(it) { delay(1800); statusMessage = null }
+                modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 2.dp))
+            LaunchedEffect(it) { delay(1600); statusMessage = null }
         }
 
-        // === TOOLS BAR ===
-        Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(vertical = 6.dp)) {
+        // TOOLS
+        Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(vertical = 5.dp)) {
             if (toolMode == ToolMode.DRAW) {
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     DefaultBrushes.all.forEach { brush ->
-                        val selected = currentBrushId == brush.id
-                        Box(modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(if (selected) Color(0xFF7C4DFF) else Color(0xFF333333))
+                        val sel = currentBrushId == brush.id
+                        Box(modifier = Modifier.clip(RoundedCornerShape(5.dp))
+                            .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF333333))
                             .clickable { canvasEngine.setBrush(brush.id); canvasEngine.setSize(brush.defaultSize) }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)) {
-                            Text(brush.name, color = Color.White, fontSize = 11.sp)
+                            .padding(horizontal = 9.dp, vertical = 5.dp)) {
+                            Text(brush.name, color = Color.White, fontSize = 10.sp)
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(5.dp))
             }
 
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (toolMode == ToolMode.DRAW) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         colors.forEach { c ->
-                            val selected = currentColor == c
-                            Box(modifier = Modifier.size(22.dp).clip(CircleShape).background(Color(c))
-                                .border(if (selected) 2.dp else 1.dp, if (selected) Color.White else Color.Gray, CircleShape)
+                            val sel = currentColor == c
+                            Box(modifier = Modifier.size(20.dp).clip(CircleShape).background(Color(c))
+                                .border(if (sel) 2.dp else 1.dp, if (sel) Color.White else Color.Gray, CircleShape)
                                 .clickable { canvasEngine.setColor(c) })
                         }
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                 }
-
-                Text(if (toolMode == ToolMode.ERASE) "Eraser" else "Size", color = Color.LightGray, fontSize = 10.sp)
-                Slider(value = currentSize, onValueChange = { canvasEngine.setSize(it) }, valueRange = 1f..80f,
-                    modifier = Modifier.width(100.dp),
+                Text("Size", color = Color.LightGray, fontSize = 10.sp)
+                Slider(value = currentSize, onValueChange = { canvasEngine.setSize(it) }, valueRange = 1f..70f,
+                    modifier = Modifier.width(90.dp),
                     colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF)))
-                Text("${currentSize.toInt()}", color = Color.White, fontSize = 10.sp)
-
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Smooth", color = Color.LightGray, fontSize = 10.sp)
-                Slider(value = stabilization, onValueChange = { canvasEngine.setStabilization(it) }, valueRange = 0f..1f,
-                    modifier = Modifier.width(80.dp),
-                    colors = SliderDefaults.colors(thumbColor = Color(0xFF03DAC6), activeTrackColor = Color(0xFF018786)))
             }
         }
 
-        // === CANVAS + LAYERS ===
+        // CANVAS + LAYERS
         Row(modifier = Modifier.weight(1f)) {
             Box(modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFF2C2C2C))) {
                 Canvas(modifier = Modifier.fillMaxSize().pointerInput(Unit) {
                     detectDragGestures(
-                        onDragStart = { offset -> canvasEngine.startStroke(StrokePoint(offset.x, offset.y, 1f)) },
-                        onDrag = { change, _ -> canvasEngine.addPointToStroke(StrokePoint(change.position.x, change.position.y, 1f)) },
+                        onDragStart = { o -> canvasEngine.startStroke(StrokePoint(o.x, o.y, 1f)) },
+                        onDrag = { c, _ -> canvasEngine.addPointToStroke(StrokePoint(c.position.x, c.position.y, 1f)) },
                         onDragEnd = { canvasEngine.endStroke() }
                     )
                 }) {
                     layers.forEach { layer ->
                         if (!layer.isVisible) return@forEach
-                        (strokesByLayer[layer.id] ?: emptyList()).forEach { stroke -> drawStroke(stroke, layer.opacity) }
+                        (strokesByLayer[layer.id] ?: emptyList()).forEach { s -> drawStroke(s, layer.opacity) }
                     }
                     if (currentStroke.size > 1) {
                         val path = Path().apply {
                             moveTo(currentStroke[0].x, currentStroke[0].y)
                             for (i in 1 until currentStroke.size) lineTo(currentStroke[i].x, currentStroke[i].y)
                         }
-                        val color = if (toolMode == ToolMode.ERASE) Color.Gray.copy(alpha = 0.4f) else Color(currentColor)
-                        drawPath(path, color, style = Stroke(currentSize, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                        val col = if (toolMode == ToolMode.ERASE) Color.Gray.copy(0.4f) else Color(currentColor)
+                        drawPath(path, col, style = Stroke(currentSize, cap = StrokeCap.Round, join = StrokeJoin.Round))
                     }
+                }
+
+                // Demo keyframe indicator
+                if (timelineMode == TimelineMode.KEYFRAME) {
+                    Text(
+                        text = "Opacity demo: ${(demoOpacity * 100).toInt()}%",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+                    )
                 }
             }
 
-            // Layers panel
-            Column(modifier = Modifier.width(130.dp).fillMaxHeight().background(Color(0xFF1A1A1A)).padding(6.dp)) {
-                Text("Layers", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(6.dp))
+            Column(modifier = Modifier.width(120.dp).fillMaxHeight().background(Color(0xFF1A1A1A)).padding(5.dp)) {
+                Text("Layers", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(4.dp))
                 layers.asReversed().forEach { layer ->
                     val active = layer.id == activeLayerId
-                    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp))
+                    Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
                         .background(if (active) Color(0xFF3A2A5A) else Color.Transparent)
-                        .clickable { canvasEngine.setActiveLayer(layer.id) }.padding(6.dp),
+                        .clickable { canvasEngine.setActiveLayer(layer.id) }.padding(5.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(10.dp).clip(CircleShape)
+                        Box(modifier = Modifier.size(9.dp).clip(CircleShape)
                             .background(if (layer.isVisible) Color(0xFF03DAC6) else Color.Gray)
                             .clickable { canvasEngine.toggleLayerVisibility(layer.id) })
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(layer.name, color = if (active) Color.White else Color.LightGray, fontSize = 11.sp)
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(layer.name, color = if (active) Color.White else Color.LightGray, fontSize = 10.sp)
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).background(Color(0xFF333333))
-                    .clickable { canvasEngine.addLayer() }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                    Text("+ Layer", color = Color.White, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Box(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(Color(0xFF333333))
+                    .clickable { canvasEngine.addLayer() }.padding(vertical = 7.dp), contentAlignment = Alignment.Center) {
+                    Text("+ Layer", color = Color.White, fontSize = 10.sp)
                 }
             }
         }
 
-        // === TIMELINE (Phase 2) ===
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(160.dp)
-                .background(Color(0xFF111111))
-        ) {
-            // Timeline controls
+        // === TIMELINE ===
+        Column(modifier = Modifier.fillMaxWidth().height(170.dp).background(Color(0xFF111111))) {
+
+            // Controls
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(36.dp)
-                    .background(Color(0xFF1A1A1A))
-                    .padding(horizontal = 10.dp),
+                modifier = Modifier.fillMaxWidth().height(34.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // Mode buttons
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TimelineMode.values().forEach { mode ->
-                        val selected = timelineMode == mode
+                        val sel = timelineMode == mode
                         Box(modifier = Modifier.clip(RoundedCornerShape(4.dp))
-                            .background(if (selected) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
+                            .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
                             .clickable { timeline.setMode(mode) }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)) {
-                            Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }, color = Color.White, fontSize = 10.sp)
+                            .padding(horizontal = 7.dp, vertical = 3.dp)) {
+                            Text(mode.name.take(3), color = Color.White, fontSize = 10.sp)
                         }
                     }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${currentFrame} / ${durationFrames}", color = Color.LightGray, fontSize = 11.sp)
-                    Text("%.0f fps".format(fps), color = Color.Gray, fontSize = 10.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("$currentFrame / $durationFrames", color = Color.LightGray, fontSize = 10.sp)
 
-                    ToolButton(if (isPlaying) "Pause" else "Play") { timeline.togglePlay() }
-                    ToolButton("|◀") { timeline.previousFrame() }
-                    ToolButton("▶|") { timeline.nextFrame() }
+                    // Keyframe quick actions (only in Keyframe mode)
+                    if (timelineMode == TimelineMode.KEYFRAME) {
+                        ToolButton("+KF") {
+                            timeline.addOrUpdateKeyframe("opacity", currentFrame, 1f, EasingType.EASE_IN_OUT)
+                            statusMessage = "Keyframe added at $currentFrame"
+                        }
+                        ToolButton("KF 0") {
+                            timeline.addOrUpdateKeyframe("opacity", currentFrame, 0f, EasingType.EASE_IN_OUT)
+                            statusMessage = "Opacity 0 at $currentFrame"
+                        }
+                    }
+
+                    ToolButton(if (isPlaying) "||" else ">") { timeline.togglePlay() }
+                    ToolButton("<") { timeline.previousFrame() }
+                    ToolButton(">") { timeline.nextFrame() }
                 }
             }
 
-            // Tracks + Playhead area
-            Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                // Simple track representation
+            // Tracks area
+            Box(modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 3.dp)) {
                 Column {
-                    tracks.forEachIndexed { index, track ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(28.dp)
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(track.name, color = Color.LightGray, fontSize = 10.sp, modifier = Modifier.width(70.dp))
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(20.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(Color(0xFF2A2A2A))
-                            )
+                    tracks.forEach { track ->
+                        Row(modifier = Modifier.fillMaxWidth().height(26.dp).padding(vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(track.name, color = Color.LightGray, fontSize = 9.sp, modifier = Modifier.width(60.dp))
+                            Box(modifier = Modifier.weight(1f).height(18.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF2A2A2A)))
+                        }
+                    }
+
+                    // Demo property track
+                    if (timelineMode == TimelineMode.KEYFRAME) {
+                        Row(modifier = Modifier.fillMaxWidth().height(26.dp).padding(vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text("opacity", color = Color(0xFF03DAC6), fontSize = 9.sp, modifier = Modifier.width(60.dp))
+                            Box(modifier = Modifier.weight(1f).height(18.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF1E3A3A)))
                         }
                     }
                 }
 
-                // Playhead line
-                val playheadFraction = if (durationFrames > 0) currentFrame.toFloat() / durationFrames else 0f
+                // Playhead
+                val fraction = if (durationFrames > 0) currentFrame.toFloat() / durationFrames else 0f
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    val x = 70.dp.toPx() + (size.width - 70.dp.toPx()) * playheadFraction
-                    drawLine(
-                        color = Color(0xFFFF5252),
-                        start = Offset(x, 0f),
-                        end = Offset(x, size.height),
-                        strokeWidth = 2f
-                    )
+                    val x = 60.dp.toPx() + (size.width - 60.dp.toPx()) * fraction
+                    drawLine(Color(0xFFFF5252), Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
                 }
 
-                // Click to seek
-                Box(modifier = Modifier.fillMaxSize().padding(start = 70.dp).pointerInput(durationFrames) {
+                Box(modifier = Modifier.fillMaxSize().padding(start = 60.dp).pointerInput(durationFrames) {
                     detectTapGestures { offset ->
-                        val fraction = (offset.x / size.width).coerceIn(0f, 1f)
-                        timeline.seekTo((fraction * durationFrames).toInt())
+                        val f = (offset.x / size.width).coerceIn(0f, 1f)
+                        timeline.seekTo((f * durationFrames).toInt())
                     }
                 })
             }
@@ -310,13 +303,13 @@ fun WorkspaceScreen() {
 
 @Composable
 private fun ToolButton(text: String, selected: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    Box(modifier = Modifier.clip(RoundedCornerShape(5.dp))
+    Box(modifier = Modifier.clip(RoundedCornerShape(4.dp))
         .background(when {
             selected -> Color(0xFF7C4DFF)
             enabled -> Color(0xFF333333)
             else -> Color(0xFF222222)
-        }).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 8.dp, vertical = 5.dp)) {
-        Text(text, color = if (enabled) Color.White else Color.Gray, fontSize = 11.sp)
+        }).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 7.dp, vertical = 4.dp)) {
+        Text(text, color = if (enabled) Color.White else Color.Gray, fontSize = 10.sp)
     }
 }
 

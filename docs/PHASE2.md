@@ -1,38 +1,46 @@
-# Phase 2 — Timeline Foundation
+# Phase 2 — Progress
 
-## What was delivered
+## Completed
 
-### TimelineEngine
-- Multi-track support
-- Playhead (currentFrame)
-- Playback (Play / Pause / Loop)
-- FPS control
-- Duration in frames
-- Three modes: **Compose / Keyframe / Perform**
-- Seek by click on timeline
-- Previous / Next frame
+### Timeline Foundation
+- Multi-track
+- Playhead + Playback (Play/Pause/Loop)
+- Seek by click
+- FPS + Duration
+- Modes: Compose / Keyframe / Perform
 
-### UI Integration
-- Full timeline panel at the bottom
-- Mode switcher (Compose, Keyframe, Perform)
-- Play / Pause / Step controls
-- Visual playhead (red line)
-- Track list
-- Frame counter + FPS display
+### Keyframe System (new)
+- `Keyframe` model with EasingType
+- `AnimatableProperty` with interpolation
+- Supported easings:
+  - LINEAR
+  - EASE_IN
+  - EASE_OUT
+  - EASE_IN_OUT (default)
+  - HOLD
+- `valueAt(frame)` method that correctly interpolates between keyframes
+- API to add/update/remove keyframes
 
-### Architecture
-- Timeline is completely independent from CanvasEngine
-- Ready to receive Content (Drawings, Flipbooks, etc.)
-- Playback ticker using coroutines
+### UI
+- Keyframe mode shows demo opacity property
+- Quick buttons to add keyframes at current frame
+- Visual feedback of interpolated value
 
-## Next inside Phase 2
+## How to test Keyframes right now
 
-1. Connect canvas drawings to timeline tracks (as Content)
-2. Flipbook mode (frame-by-frame)
-3. Onion Skin
-4. Basic Keyframe system (position / opacity)
-5. Perform mode (record motion)
+1. Switch to **Keyframe** mode
+2. Go to frame 0 → press **KF 0** (sets opacity = 0)
+3. Go to frame 60 → press **+KF** (sets opacity = 1)
+4. Press Play → watch the opacity value change with easing
+
+## Next steps in Phase 2
+
+1. Attach real Content (drawings) to tracks
+2. Flipbook + Onion Skin
+3. Visual keyframes on the timeline tracks
+4. More properties (position, scale, rotation)
+5. Perform mode (record)
 
 ---
 
-**Status:** Timeline foundation is live and playable.
+**Status:** Keyframe interpolation is working.
