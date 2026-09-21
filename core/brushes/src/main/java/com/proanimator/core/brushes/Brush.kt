@@ -27,15 +27,17 @@ enum class BrushCategory {
 
 object DefaultBrushes {
     val technicalPen = Brush(
+        id = "technical_pen",
         name = "Technical Pen",
         category = BrushCategory.INK,
         defaultSize = 4f,
         pressureSize = true,
         pressureOpacity = false,
-        stabilization = 0.4f
+        stabilization = 0.45f
     )
 
     val softAirbrush = Brush(
+        id = "soft_airbrush",
         name = "Soft Airbrush",
         category = BrushCategory.AIRBRUSH,
         defaultSize = 40f,
@@ -45,12 +47,24 @@ object DefaultBrushes {
     )
 
     val roundBrush = Brush(
+        id = "round_brush",
         name = "Round Brush",
         category = BrushCategory.PAINT,
-        defaultSize = 20f,
+        defaultSize = 18f,
         pressureSize = true,
-        pressureOpacity = true
+        pressureOpacity = true,
+        stabilization = 0.3f
     )
 
-    val all = listOf(technicalPen, softAirbrush, roundBrush)
+    val sketchPencil = Brush(
+        id = "sketch_pencil",
+        name = "Sketch Pencil",
+        category = BrushCategory.SKETCH,
+        defaultSize = 6f,
+        pressureSize = true,
+        pressureOpacity = true,
+        stabilization = 0.15f
+    )
+
+    val all = listOf(technicalPen, softAirbrush, roundBrush, sketchPencil)
 }

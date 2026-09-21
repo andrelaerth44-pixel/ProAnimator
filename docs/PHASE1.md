@@ -1,6 +1,6 @@
 # Phase 1 — Progress
 
-## Completed in this commit
+## Completed
 
 ### Multi-module structure
 - `:app`
@@ -10,43 +10,39 @@
 - `:core:timeline`
 
 ### Domain Models
-- `Project`
-- `Track`
-- `Content` (Drawing, Flipbook, Group)
-- `Layer` + BlendMode
-- `Keyframe` + Easing
-- `Stroke` + `StrokePoint` (with pressure & tilt support)
+- Project, Track, Content, Layer, Keyframe, Stroke, StrokePoint
 
-### Core Engine
-- `CanvasEngine`
-  - Layer management
-  - Stroke capture (start / add / end)
-  - Basic Undo/Redo command pattern ready
-  - StateFlow for reactive UI
+### Canvas Engine (major upgrade)
+- Strokes are now **persisted per layer**
+- Active layer selection
+- Add / Remove / Clear / Toggle visibility of layers
+- Current brush, color and size state
+- Real-time stroke capture
 
 ### Brush System
-- `Brush` data class
-- Categories (Sketch, Ink, Paint, Airbrush...)
-- Default brushes (Technical Pen, Soft Airbrush, Round)
+- 4 default brushes with fixed IDs
+- Technical Pen, Soft Airbrush, Round Brush, Sketch Pencil
 
-### Timeline skeleton
-- `TimelineEngine`
-- Modes: COMPOSE / KEYFRAME / PERFORM
-- Play / Pause / Seek
+### UI (Workspace)
+- Top bar
+- **Brush selector** (horizontal scroll)
+- Main canvas with multi-layer rendering
+- **Layer panel** on the right (add, select, visibility, clear)
+- Timeline placeholder
 
-### App UI
-- Dark theme professional
-- Basic drawing canvas with finger/stylus
-- Top bar + Timeline placeholder
+## Current limitations (expected in Phase 1)
+- Pressure is still fixed at 1.0 (need MotionEvent for real stylus pressure)
+- No ImageBitmap yet (strokes are paths — good for now, will migrate later)
+- No undo stack implemented yet (structure is ready)
+- No project save/load yet
 
-## Next inside Phase 1
-
-1. Real pressure from MotionEvent (Stylus)
-2. Persist strokes into layer bitmaps (Skia or Compose ImageBitmap)
-3. Multiple layers working visually
-4. Simple project save (JSON for now)
-5. Brush selection UI
+## Next steps inside Phase 1
+1. Real stylus pressure via MotionEvent / PointerInput
+2. Simple undo (last stroke)
+3. Color picker
+4. Project save as JSON (temporary format)
+5. Better stroke smoothing / stabilization
 
 ---
 
-**Status:** Foundation is solid and ready to evolve.
+**Status:** Drawing experience is now usable. Layers work. Brushes selectable.
