@@ -1,53 +1,52 @@
-# Phase 2 — Progress
+# Phase 2 — Current Status
 
-## Completed in this iteration
+## Completed
 
-### Flipbook System
-- `Flipbook` + `FlipbookFrame` models
-- `FlipbookEngine` with full frame management:
-  - Add frame
-  - Duplicate current frame
-  - Delete frame
-  - Clear frame
-  - Next / Previous frame
-  - Auto-add frame when going past the end
+### Classic Onion Skin Colors
+- Previous frames → **Red / Orange** tones
+- Next frames → **Green / Cyan** tones
+- Opacity falloff by distance
 
-### Onion Skin
-- Previous frames (configurable count)
-- Next frames (configurable count)
-- Opacity falloff (older frames more transparent)
-- Toggle ON/OFF
+### Expanded Keyframe Properties
+- `OPACITY`
+- `POSITION_X` / `POSITION_Y`
+- `SCALE`
+- `ROTATION`
+- All with full interpolation (Linear, EaseIn, EaseOut, EaseInOut, Hold)
 
-### UI
-- Frame strip at the bottom (click to jump)
-- Frame counter
-- Onion Skin toggle
-- Flipbook controls (add, dup, del, clear, prev, next)
+### Perform Mode Foundation
+- Recording state (`isRecording`)
+- Start / Stop recording
+- `recordProperty()` API ready to capture live values while playing
 
-### Drawing integration
-- Every stroke drawn is automatically added to the **current Flipbook frame**
+### Flipbook + Timeline
+- Flipbook fully functional
+- Frame strip + controls
+- Strokes go directly into current Flipbook frame
 
-## How to use right now
+## How to test
 
-1. Draw something on Frame 1
-2. Press **+Frame** or **▶|** (next)
-3. Draw on the new frame
-4. Turn **Onion ON** to see previous frames as ghost
-5. Navigate between frames with the strip or arrows
+**Onion Skin**
+1. Draw on frame 1
+2. Add frame and draw something else
+3. Turn Onion ON → previous = red, next = green
 
-## Current full Phase 2 features
+**Keyframes**
+1. Switch to Keyframe mode
+2. Use +Op / Op0 / +Sc / +Rot at different frames
+3. Play and watch values change
 
-- Timeline (playhead, play/pause, modes)
-- Keyframe system + interpolation (Linear / Ease In/Out/In-Out)
-- **Flipbook + Onion Skin**
+**Perform**
+1. Switch to Perform mode
+2. Press Rec → it starts playing + recording
+3. (Next step: actually capture drag gestures into keyframes)
 
-## Next
-
-1. Better visual separation of onion skin colors (classic red/green)
-2. Link Flipbook to Timeline tracks properly
-3. Perform mode
-4. More properties for keyframes (position, scale...)
+## Next remaining pieces
+- Make Perform mode capture real touch movement into Position keyframes
+- Visual keyframes on the timeline tracks
+- Apply Scale / Rotation / Position visually on the canvas content
+- Better content-to-track binding
 
 ---
 
-**Status:** You can already do proper frame-by-frame animation with onion skin.
+**Phase 2 is now very solid.**

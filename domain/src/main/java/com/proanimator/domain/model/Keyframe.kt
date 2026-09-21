@@ -10,40 +10,41 @@ enum class EasingType {
     HOLD
 }
 
-/**
- * A keyframe stores a value at a specific frame.
- * Supports common easing types used in Procreate Dreams.
- */
 data class Keyframe(
     val id: String = UUID.randomUUID().toString(),
     val frame: Int,
     val value: Float,
     val easing: EasingType = EasingType.EASE_IN_OUT,
-    // Future: for Bezier handles
     val inTangent: Float? = null,
     val outTangent: Float? = null
 )
 
 /**
- * Animatable property (position X/Y, scale, rotation, opacity, etc.)
+ * Supported animatable properties (expandable).
  */
+enum class PropertyType {
+    OPACITY,
+    POSITION_X,
+    POSITION_Y,
+    SCALE,
+    ROTATION
+}
+
 data class AnimatableProperty(
-    val name: String,
+    val type: PropertyType,
     val keyframes: List<Keyframe> = emptyList()
 ) {
+    val name: String get() = type.name.lowercase()
+
     fun valueAt(frame: Int): Float {
-        if (keyframes.isEmpty()) return 0f
+        if (keyframes.isEmpty()) return defaultValue()
         if (keyframes.size == 1) return keyframes.first().value
 
         val sorted = keyframes.sortedBy { it.frame }
 
-        // Before first keyframe
         if (frame <= sorted.first().frame) return sorted.first().value
-
-        // After last keyframe
         if (frame >= sorted.last().frame) return sorted.last().value
 
-        // Find the two keyframes we are between
         for (i in 0 until sorted.lastIndex) {
             val k1 = sorted[i]
             val k2 = sorted[i + 1]
@@ -56,8 +57,14 @@ data class AnimatableProperty(
                 return k1.value + (k2.value - k1.value) * easedT
             }
         }
-
         return sorted.last().value
+    }
+
+    private fun defaultValue(): Float = when (type) {
+        PropertyType.OPACITY -> 1f
+        PropertyType.POSITION_X, PropertyType.POSITION_Y -> 0f
+        PropertyType.SCALE -> 1f
+        PropertyType.ROTATION -> 0f
     }
 
     private fun applyEasing(t: Float, type: EasingType): Float {
@@ -65,11 +72,8 @@ data class AnimatableProperty(
             EasingType.LINEAR -> t
             EasingType.EASE_IN -> t * t
             EasingType.EASE_OUT -> t * (2f - t)
-            EasingType.EASE_IN_OUT -> {
-                if (t < 0.5f) 2f * t * t
-                else -1f + (4f - 2f * t) * t
-            }
-            EasingType.HOLD -> 0f // handled earlier
+            EasingType.EASE_IN_OUT -> if (t < 0.5f) 2f * t * t else -1f + (4f - 2f * t) * t
+            EasingType.HOLD -> 0f
         }
     }
 }
