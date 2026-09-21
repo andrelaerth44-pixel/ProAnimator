@@ -10,8 +10,7 @@ import kotlinx.coroutines.flow.update
 
 /**
  * Core painting engine.
- * Manages layers, strokes persistence and history.
- * Designed for real-time performance.
+ * Manages layers, strokes persistence, undo/redo and brush state.
  */
 class CanvasEngine(
     val width: Int,
@@ -23,14 +22,12 @@ class CanvasEngine(
     private val _activeLayerId = MutableStateFlow(_layers.value.first().id)
     val activeLayerId: StateFlow<String> = _activeLayerId.asStateFlow()
 
-    // Strokes stored per layer
     private val _strokesByLayer = MutableStateFlow<Map<String, List<Stroke>>>(emptyMap())
     val strokesByLayer: StateFlow<Map<String, List<Stroke>>> = _strokesByLayer.asStateFlow()
 
     private val _currentStroke = MutableStateFlow<List<StrokePoint>>(emptyList())
     val currentStroke: StateFlow<List<StrokePoint>> = _currentStroke.asStateFlow()
 
-    // Current brush settings
     private val _currentBrushId = MutableStateFlow("technical_pen")
     val currentBrushId: StateFlow<String> = _currentBrushId.asStateFlow()
 
@@ -40,8 +37,15 @@ class CanvasEngine(
     private val _currentSize = MutableStateFlow(8f)
     val currentSize: StateFlow<Float> = _currentSize.asStateFlow()
 
-    private val history = mutableListOf<EngineCommand>()
-    private var historyIndex = -1
+    // Simple undo stack (stores previous strokes map)
+    private val undoStack = mutableListOf<Map<String, List<Stroke>>>()
+    private val redoStack = mutableListOf<Map<String, List<Stroke>>>()
+
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
+
+    private val _canRedo = MutableStateFlow(false)
+    val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
 
     fun setActiveLayer(layerId: String) {
         if (_layers.value.any { it.id == layerId }) {
@@ -86,18 +90,50 @@ class CanvasEngine(
 
         val layerId = _activeLayerId.value
 
-        // Commit stroke to the active layer
+        // Save state for undo
+        pushUndoState()
+
+        // Commit stroke
         _strokesByLayer.update { current ->
             val existing = current[layerId] ?: emptyList()
             current + (layerId to (existing + stroke))
         }
 
-        // Clear temporary stroke
         _currentStroke.value = emptyList()
-
-        // TODO: Push to history for undo
+        redoStack.clear()
+        updateUndoRedoState()
 
         return stroke
+    }
+
+    private fun pushUndoState() {
+        undoStack.add(_strokesByLayer.value.toMap())
+        if (undoStack.size > 50) { // limit history
+            undoStack.removeAt(0)
+        }
+    }
+
+    fun undo() {
+        if (undoStack.isEmpty()) return
+
+        redoStack.add(_strokesByLayer.value.toMap())
+        val previous = undoStack.removeAt(undoStack.lastIndex)
+        _strokesByLayer.value = previous
+        updateUndoRedoState()
+    }
+
+    fun redo() {
+        if (redoStack.isEmpty()) return
+
+        undoStack.add(_strokesByLayer.value.toMap())
+        val next = redoStack.removeAt(redoStack.lastIndex)
+        _strokesByLayer.value = next
+        updateUndoRedoState()
+    }
+
+    private fun updateUndoRedoState() {
+        _canUndo.value = undoStack.isNotEmpty()
+        _canRedo.value = redoStack.isNotEmpty()
     }
 
     fun addLayer(name: String = "Layer ${_layers.value.size + 1}") {
@@ -109,12 +145,14 @@ class CanvasEngine(
     fun removeLayer(layerId: String) {
         if (_layers.value.size <= 1) return
 
+        pushUndoState()
         _layers.update { it.filter { layer -> layer.id != layerId } }
         _strokesByLayer.update { it - layerId }
 
         if (_activeLayerId.value == layerId) {
             _activeLayerId.value = _layers.value.last().id
         }
+        updateUndoRedoState()
     }
 
     fun setLayerOpacity(layerId: String, opacity: Float) {
@@ -134,26 +172,10 @@ class CanvasEngine(
     }
 
     fun clearActiveLayer() {
+        pushUndoState()
         val layerId = _activeLayerId.value
         _strokesByLayer.update { it + (layerId to emptyList()) }
-    }
-
-    fun undo() {
-        if (historyIndex >= 0) {
-            history[historyIndex].undo()
-            historyIndex--
-        }
-    }
-
-    fun redo() {
-        if (historyIndex < history.lastIndex) {
-            historyIndex++
-            history[historyIndex].execute()
-        }
-    }
-
-    interface EngineCommand {
-        fun execute()
-        fun undo()
+        redoStack.clear()
+        updateUndoRedoState()
     }
 }

@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -29,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -54,6 +55,21 @@ fun WorkspaceScreen() {
     val currentStroke by engine.currentStroke.collectAsState()
     val currentBrushId by engine.currentBrushId.collectAsState()
     val currentSize by engine.currentSize.collectAsState()
+    val currentColor by engine.currentColor.collectAsState()
+    val canUndo by engine.canUndo.collectAsState()
+    val canRedo by engine.canRedo.collectAsState()
+
+    val colors = listOf(
+        0xFFFFFFFF, // White
+        0xFF000000, // Black
+        0xFFFF5252, // Red
+        0xFFFF9800, // Orange
+        0xFFFFEB3B, // Yellow
+        0xFF4CAF50, // Green
+        0xFF2196F3, // Blue
+        0xFF9C27B0, // Purple
+        0xFFE91E63  // Pink
+    )
 
     Column(modifier = Modifier.fillMaxSize()) {
 
@@ -74,54 +90,115 @@ fun WorkspaceScreen() {
                 fontWeight = FontWeight.Bold
             )
 
-            Text(
-                text = "Phase 1 · Canvas Engine",
-                color = Color.Gray,
-                fontSize = 13.sp
-            )
-        }
-
-        // === BRUSH SELECTOR ===
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .background(Color(0xFF222222))
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            DefaultBrushes.all.forEach { brush ->
-                val isSelected = currentBrushId == brush.id ||
-                        (currentBrushId == "technical_pen" && brush.name == "Technical Pen")
-
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Undo
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isSelected) Color(0xFF7C4DFF) else Color(0xFF333333))
-                        .clickable {
-                            engine.setBrush(brush.id)
-                            engine.setSize(brush.defaultSize)
-                        }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (canUndo) Color(0xFF333333) else Color(0xFF222222))
+                        .clickable(enabled = canUndo) { engine.undo() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
-                    Text(
-                        text = brush.name,
-                        color = Color.White,
-                        fontSize = 13.sp
-                    )
+                    Text("Undo", color = if (canUndo) Color.White else Color.Gray, fontSize = 13.sp)
+                }
+
+                // Redo
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (canRedo) Color(0xFF333333) else Color(0xFF222222))
+                        .clickable(enabled = canRedo) { engine.redo() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text("Redo", color = if (canRedo) Color.White else Color.Gray, fontSize = 13.sp)
+                }
+            }
+        }
+
+        // === BRUSH + COLOR + SIZE BAR ===
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF222222))
+                .padding(vertical = 8.dp)
+        ) {
+            // Brushes
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DefaultBrushes.all.forEach { brush ->
+                    val isSelected = currentBrushId == brush.id
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) Color(0xFF7C4DFF) else Color(0xFF333333))
+                            .clickable {
+                                engine.setBrush(brush.id)
+                                engine.setSize(brush.defaultSize)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(text = brush.name, color = Color.White, fontSize = 12.sp)
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Size indicator
-            Text(
-                text = "Size: ${currentSize.toInt()}px",
-                color = Color.LightGray,
-                fontSize = 12.sp
-            )
+            // Colors + Size
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Color swatches
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    colors.forEach { colorLong ->
+                        val isSelected = currentColor == colorLong
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(colorLong))
+                                .border(
+                                    width = if (isSelected) 3.dp else 1.dp,
+                                    color = if (isSelected) Color.White else Color.Gray,
+                                    shape = CircleShape
+                                )
+                                .clickable { engine.setColor(colorLong) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                // Size slider
+                Text("Size", color = Color.LightGray, fontSize = 12.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Slider(
+                    value = currentSize,
+                    onValueChange = { engine.setSize(it) },
+                    valueRange = 1f..80f,
+                    modifier = Modifier.width(140.dp),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFFBB86FC),
+                        activeTrackColor = Color(0xFF7C4DFF)
+                    )
+                )
+                Text(
+                    text = "${currentSize.toInt()}",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(28.dp)
+                )
+            }
         }
 
         // === MAIN AREA ===
@@ -141,40 +218,32 @@ fun WorkspaceScreen() {
                             detectDragGestures(
                                 onDragStart = { offset ->
                                     engine.startStroke(
-                                        StrokePoint(
-                                            x = offset.x,
-                                            y = offset.y,
-                                            pressure = 1f
-                                        )
+                                        StrokePoint(x = offset.x, y = offset.y, pressure = 1f)
                                     )
                                 },
                                 onDrag = { change, _ ->
-                                    // TODO: Extract real pressure from change when available
                                     engine.addPointToStroke(
                                         StrokePoint(
                                             x = change.position.x,
                                             y = change.position.y,
-                                            pressure = 1f
+                                            pressure = 1f // real pressure later
                                         )
                                     )
                                 },
-                                onDragEnd = {
-                                    engine.endStroke()
-                                }
+                                onDragEnd = { engine.endStroke() }
                             )
                         }
                 ) {
-                    // Draw all committed strokes from all visible layers
+                    // Draw committed strokes
                     layers.forEach { layer ->
                         if (!layer.isVisible) return@forEach
-
                         val strokes = strokesByLayer[layer.id] ?: emptyList()
                         strokes.forEach { stroke ->
                             drawStroke(stroke, layer.opacity)
                         }
                     }
 
-                    // Draw current (in-progress) stroke
+                    // Current stroke
                     if (currentStroke.size > 1) {
                         val path = Path()
                         path.moveTo(currentStroke[0].x, currentStroke[0].y)
@@ -183,7 +252,7 @@ fun WorkspaceScreen() {
                         }
                         drawPath(
                             path = path,
-                            color = Color.White,
+                            color = Color(currentColor),
                             style = Stroke(
                                 width = currentSize,
                                 cap = StrokeCap.Round,
@@ -205,7 +274,7 @@ fun WorkspaceScreen() {
             // === LAYER PANEL ===
             Column(
                 modifier = Modifier
-                    .width(160.dp)
+                    .width(150.dp)
                     .fillMaxHeight()
                     .background(Color(0xFF1A1A1A))
                     .padding(8.dp)
@@ -230,7 +299,6 @@ fun WorkspaceScreen() {
                             .padding(horizontal = 8.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Visibility toggle
                         Box(
                             modifier = Modifier
                                 .size(12.dp)
@@ -238,9 +306,7 @@ fun WorkspaceScreen() {
                                 .background(if (layer.isVisible) Color(0xFF03DAC6) else Color.Gray)
                                 .clickable { engine.toggleLayerVisibility(layer.id) }
                         )
-
                         Spacer(modifier = Modifier.width(8.dp))
-
                         Text(
                             text = layer.name,
                             color = if (isActive) Color.White else Color.LightGray,
@@ -251,7 +317,6 @@ fun WorkspaceScreen() {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Add layer button
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -266,7 +331,6 @@ fun WorkspaceScreen() {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Clear layer
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -281,16 +345,16 @@ fun WorkspaceScreen() {
             }
         }
 
-        // === BOTTOM TIMELINE PLACEHOLDER ===
+        // === BOTTOM ===
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(100.dp)
+                .height(90.dp)
                 .background(Color(0xFF141414)),
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Timeline · Coming in Phase 2",
+                text = "Timeline · Phase 2",
                 color = Color.Gray,
                 fontSize = 14.sp
             )
@@ -306,7 +370,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(
 
     val path = Path()
     path.moveTo(stroke.points[0].x, stroke.points[0].y)
-
     for (i in 1 until stroke.points.size) {
         path.lineTo(stroke.points[i].x, stroke.points[i].y)
     }

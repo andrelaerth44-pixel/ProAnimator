@@ -1,48 +1,45 @@
 # Phase 1 — Progress
 
-## Completed
+## Completed in this iteration
 
-### Multi-module structure
-- `:app`
-- `:domain`
-- `:core:engine`
-- `:core:brushes`
-- `:core:timeline`
+### Undo / Redo System
+- Full undo/redo stack (up to 50 states)
+- Buttons enabled/disabled based on availability
+- Works for strokes and clear layer
 
-### Domain Models
-- Project, Track, Content, Layer, Keyframe, Stroke, StrokePoint
+### Color Picker
+- 9 quick color swatches (White, Black, Red, Orange, Yellow, Green, Blue, Purple, Pink)
+- Visual selection indicator
 
-### Canvas Engine (major upgrade)
-- Strokes are now **persisted per layer**
-- Active layer selection
-- Add / Remove / Clear / Toggle visibility of layers
-- Current brush, color and size state
-- Real-time stroke capture
+### Size Control
+- Slider from 1px to 80px
+- Live size display
 
-### Brush System
-- 4 default brushes with fixed IDs
-- Technical Pen, Soft Airbrush, Round Brush, Sketch Pencil
+### Engine improvements
+- Better state management
+- Undo stack is independent of layers
+- Clear layer now supports undo
 
-### UI (Workspace)
-- Top bar
-- **Brush selector** (horizontal scroll)
-- Main canvas with multi-layer rendering
-- **Layer panel** on the right (add, select, visibility, clear)
-- Timeline placeholder
+### UI
+- Top bar with Undo / Redo
+- Brush bar + Color swatches + Size slider
+- Layer panel fully functional
+- Multi-layer rendering working
 
-## Current limitations (expected in Phase 1)
-- Pressure is still fixed at 1.0 (need MotionEvent for real stylus pressure)
-- No ImageBitmap yet (strokes are paths — good for now, will migrate later)
-- No undo stack implemented yet (structure is ready)
-- No project save/load yet
+## Current usable features
+- Draw with multiple brushes
+- Change color and size
+- Multiple layers (add, select, hide, clear)
+- Undo / Redo
+- Real-time preview of current stroke
 
-## Next steps inside Phase 1
-1. Real stylus pressure via MotionEvent / PointerInput
-2. Simple undo (last stroke)
-3. Color picker
-4. Project save as JSON (temporary format)
-5. Better stroke smoothing / stabilization
+## Still missing in Phase 1 (next)
+- Real stylus pressure (MotionEvent)
+- Stroke smoothing / stabilization
+- Project Save / Load (JSON)
+- Eraser tool
+- Better performance with many strokes (will move to ImageBitmap later)
 
 ---
 
-**Status:** Drawing experience is now usable. Layers work. Brushes selectable.
+**Status:** The drawing experience is now solid for a Phase 1 prototype.
