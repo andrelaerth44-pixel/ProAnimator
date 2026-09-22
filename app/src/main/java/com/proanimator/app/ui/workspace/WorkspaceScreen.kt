@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -19,70 +18,54 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.proanimator.core.brushes.DefaultBrushes
-import com.proanimator.core.engine.CanvasEngine
+import com.proanimator.core.engine.LayerBitmapEngine
 import com.proanimator.core.engine.ToolMode
-import com.proanimator.core.export.ExportEngine
-import com.proanimator.core.export.ExportProgress
-import com.proanimator.core.export.ExportSettings
-import com.proanimator.core.fileformat.ProjectSerializer
 import com.proanimator.core.timeline.FlipbookEngine
 import com.proanimator.core.timeline.TimelineEngine
 import com.proanimator.core.timeline.TimelineMode
-import com.proanimator.domain.model.PropertyType
-import com.proanimator.domain.model.Stroke
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.io.File
 
 @Composable
 fun WorkspaceScreen() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val canvasEngine = remember { CanvasEngine(width = 1920, height = 1080) }
+
+    // New bitmap-based engine (Phase 3)
+    val bitmapEngine = remember { LayerBitmapEngine(width = 1920, height = 1080) }
     val timeline = remember { TimelineEngine() }
     val flipbookEngine = remember { FlipbookEngine() }
-    val exportEngine = remember { ExportEngine(context) }
 
-    val currentStroke by canvasEngine.currentStroke.collectAsState()
-    val currentBrushId by canvasEngine.currentBrushId.collectAsState()
-    val currentSize by canvasEngine.currentSize.collectAsState()
-    val currentColor by canvasEngine.currentColor.collectAsState()
-    val toolMode by canvasEngine.toolMode.collectAsState()
-    val canUndo by canvasEngine.canUndo.collectAsState()
-    val canRedo by canvasEngine.canRedo.collectAsState()
+    val layers by bitmapEngine.layers.collectAsState()
+    val activeLayerId by bitmapEngine.activeLayerId.collectAsState()
+    val currentPath by bitmapEngine.currentPath.collectAsState()
+    val toolMode by bitmapEngine.toolMode.collectAsState()
+    val brushSize by bitmapEngine.brushSize.collectAsState()
+    val brushColor by bitmapEngine.brushColor.collectAsState()
+    val canUndo by bitmapEngine.canUndo.collectAsState()
+    val canRedo by bitmapEngine.canRedo.collectAsState()
 
     val currentFrame by timeline.currentFrame.collectAsState()
     val isPlaying by timeline.isPlaying.collectAsState()
-    val durationFrames by timeline.durationFrames.collectAsState()
     val timelineMode by timeline.mode.collectAsState()
     val isRecording by timeline.isRecording.collectAsState()
-    val properties by timeline.properties.collectAsState()
 
     val flipbook by flipbookEngine.flipbook.collectAsState()
     val flipbookFrameIndex by flipbookEngine.currentFrameIndex.collectAsState()
 
-    val opacity by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.OPACITY, currentFrame) } }
-    val posX by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.POSITION_X, currentFrame) } }
-    val posY by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.POSITION_Y, currentFrame) } }
-    val scale by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.SCALE, currentFrame) } }
-    val rotation by remember { derivedStateOf { timeline.getPropertyValue(PropertyType.ROTATION, currentFrame) } }
-
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    var isExporting by remember { mutableStateOf(false) }
-    var exportProgress by remember { mutableStateOf<ExportProgress?>(null) }
 
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
@@ -91,358 +74,325 @@ fun WorkspaceScreen() {
         }
     }
 
-    val colors = listOf(0xFFFFFFFF, 0xFF000000, 0xFFFF5252, 0xFFFF9800, 0xFFFFEB3B, 0xFF4CAF50, 0xFF2196F3, 0xFF9C27B0, 0xFFE91E63)
-
-    val propColors = mapOf(
-        PropertyType.OPACITY to Color(0xFF80CBC4),
-        PropertyType.POSITION_X to Color(0xFF90CAF9),
-        PropertyType.SCALE to Color(0xFFFFCC80),
-        PropertyType.ROTATION to Color(0xFFCE93D8)
+    val colors = listOf(
+        0xFFFFFFFF, 0xFF000000, 0xFFFF5252, 0xFFFF9800,
+        0xFFFFEB3B, 0xFF4CAF50, 0xFF2196F3, 0xFF9C27B0, 0xFFE91E63
     )
-
-    fun doExportPngSequence() {
-        if (isExporting) return
-        isExporting = true
-        statusMessage = "Exporting..."
-
-        scope.launch {
-            val settings = ExportSettings(
-                width = 1920,
-                height = 1080,
-                fps = timeline.fps.value,
-                transparentBackground = true,
-                startFrame = 0,
-                endFrame = (flipbook.frameCount - 1).coerceAtLeast(0)
-            )
-
-            val result = exportEngine.exportPngSequence(
-                settings = settings,
-                framesProvider = { frameIndex ->
-                    flipbook.frames.getOrNull(frameIndex)?.strokes ?: emptyList()
-                },
-                onProgress = { progress ->
-                    exportProgress = progress
-                }
-            )
-
-            isExporting = false
-            exportProgress = null
-
-            result.onSuccess { dir ->
-                statusMessage = "Exported to ${dir.name}"
-            }.onFailure {
-                statusMessage = "Export failed"
-            }
-        }
-    }
-
-    fun doExportCurrentFrame() {
-        scope.launch {
-            val strokes = flipbookEngine.currentFrame?.strokes ?: emptyList()
-            val result = exportEngine.exportCurrentFrameAsPng(strokes)
-            result.onSuccess {
-                statusMessage = "Frame saved"
-            }.onFailure {
-                statusMessage = "Export failed"
-            }
-        }
-    }
 
     Column(modifier = Modifier.fillMaxSize()) {
 
         // TOP BAR
         Row(
-            modifier = Modifier.fillMaxWidth().height(38.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .background(Color(0xFF1A1A1A))
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                ToolButton("Draw", selected = toolMode == ToolMode.DRAW && timelineMode != TimelineMode.PERFORM) {
-                    canvasEngine.setToolMode(ToolMode.DRAW)
-                    if (timelineMode == TimelineMode.PERFORM) timeline.setMode(TimelineMode.COMPOSE)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ToolButton("Draw", selected = toolMode == ToolMode.DRAW) {
+                    bitmapEngine.setToolMode(ToolMode.DRAW)
                 }
-                ToolButton("Eraser", selected = toolMode == ToolMode.ERASE) { canvasEngine.setToolMode(ToolMode.ERASE) }
-                ToolButton("Undo", enabled = canUndo) { canvasEngine.undo() }
-                ToolButton("Redo", enabled = canRedo) { canvasEngine.redo() }
-                ToolButton("Save") {
-                    try {
-                        File(context.filesDir, "project.json").writeText(ProjectSerializer.toJson(canvasEngine))
-                        statusMessage = "Saved"
-                    } catch (e: Exception) { statusMessage = "Error" }
+                ToolButton("Eraser", selected = toolMode == ToolMode.ERASE) {
+                    bitmapEngine.setToolMode(ToolMode.ERASE)
                 }
-                ToolButton("Export") { doExportPngSequence() }
-                ToolButton("Frame") { doExportCurrentFrame() }
+                ToolButton("Undo", enabled = canUndo) { bitmapEngine.undo() }
+                ToolButton("Redo", enabled = canRedo) { bitmapEngine.redo() }
+                ToolButton("Clear") { bitmapEngine.clearActiveLayer() }
             }
         }
 
-        // Status / Progress
-        if (isExporting && exportProgress != null) {
-            Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                Text(exportProgress!!.message, color = Color(0xFF03DAC6), fontSize = 10.sp)
-                LinearProgressIndicator(
-                    progress = { exportProgress!!.currentFrame.toFloat() / exportProgress!!.totalFrames },
-                    modifier = Modifier.fillMaxWidth().height(3.dp),
-                    color = Color(0xFF7C4DFF),
-                    trackColor = Color(0xFF333333)
-                )
-            }
-        } else {
-            statusMessage?.let {
-                Text(it, color = Color(0xFF03DAC6), fontSize = 10.sp,
-                    modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 2.dp))
-                LaunchedEffect(it) { delay(1800); statusMessage = null }
+        statusMessage?.let {
+            Text(
+                it,
+                color = Color(0xFF03DAC6),
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF1A1A1A))
+                    .padding(horizontal = 10.dp, vertical = 2.dp)
+            )
+            LaunchedEffect(it) {
+                delay(1500)
+                statusMessage = null
             }
         }
 
         // TOOLS
-        if (timelineMode != TimelineMode.PERFORM || !isRecording) {
-            Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(vertical = 3.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF222222))
+                .padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 if (toolMode == ToolMode.DRAW) {
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        DefaultBrushes.all.forEach { brush ->
-                            val sel = currentBrushId == brush.id
-                            Box(modifier = Modifier.clip(RoundedCornerShape(4.dp))
-                                .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF333333))
-                                .clickable { canvasEngine.setBrush(brush.id); canvasEngine.setSize(brush.defaultSize) }
-                                .padding(horizontal = 6.dp, vertical = 3.dp)) {
-                                Text(brush.name, color = Color.White, fontSize = 9.sp)
-                            }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        colors.forEach { c ->
+                            val selected = brushColor == c
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(c))
+                                    .border(
+                                        if (selected) 2.dp else 1.dp,
+                                        if (selected) Color.White else Color.Gray,
+                                        CircleShape
+                                    )
+                                    .clickable { bitmapEngine.setBrushColor(c) }
+                            )
                         }
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                 }
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (toolMode == ToolMode.DRAW) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            colors.forEach { c ->
-                                val sel = currentColor == c
-                                Box(modifier = Modifier.size(15.dp).clip(CircleShape).background(Color(c))
-                                    .border(if (sel) 2.dp else 1.dp, if (sel) Color.White else Color.Gray, CircleShape)
-                                    .clickable { canvasEngine.setColor(c) })
+
+                Text(
+                    if (toolMode == ToolMode.ERASE) "Eraser" else "Size",
+                    color = Color.LightGray,
+                    fontSize = 10.sp
+                )
+                Slider(
+                    value = brushSize,
+                    onValueChange = { bitmapEngine.setBrushSize(it) },
+                    valueRange = 1f..80f,
+                    modifier = Modifier.width(100.dp),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFFBB86FC),
+                        activeTrackColor = Color(0xFF7C4DFF)
+                    )
+                )
+                Text("${brushSize.toInt()}", color = Color.White, fontSize = 10.sp)
+            }
+        }
+
+        // CANVAS + LAYERS
+        Row(modifier = Modifier.weight(1f)) {
+
+            // Main canvas with ImageBitmap layers
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(Color(0xFF2C2C2C))
+            ) {
+                // Checkerboard to show transparency (important for eraser)
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val cell = 16f
+                    var y = 0f
+                    var row = 0
+                    while (y < size.height) {
+                        var x = 0f
+                        var col = 0
+                        while (x < size.width) {
+                            val dark = (row + col) % 2 == 0
+                            drawRect(
+                                color = if (dark) Color(0xFF3A3A3A) else Color(0xFF2E2E2E),
+                                topLeft = Offset(x, y),
+                                size = androidx.compose.ui.geometry.Size(cell, cell)
+                            )
+                            x += cell
+                            col++
+                        }
+                        y += cell
+                        row++
+                    }
+                }
+
+                // Layer bitmaps + live stroke
+                // graphicsLayer with Offscreen is critical for BlendMode.Clear to work correctly
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .pointerInput(toolMode) {
+                            detectDragGestures(
+                                onDragStart = { offset ->
+                                    bitmapEngine.startStroke(StrokePoint(offset.x, offset.y, 1f))
+                                },
+                                onDrag = { change, _ ->
+                                    bitmapEngine.addPoint(
+                                        StrokePoint(change.position.x, change.position.y, 1f)
+                                    )
+                                },
+                                onDragEnd = {
+                                    bitmapEngine.endStroke()
+                                }
+                            )
+                        }
+                ) {
+                    // Draw all visible layer bitmaps
+                    layers.forEach { layer ->
+                        if (!layer.isVisible) return@forEach
+                        drawImage(
+                            image = layer.bitmap,
+                            alpha = layer.opacity
+                        )
+                    }
+
+                    // Live stroke preview
+                    if (currentPath.size > 1) {
+                        val path = Path().apply {
+                            moveTo(currentPath[0].x, currentPath[0].y)
+                            for (i in 1 until currentPath.size) {
+                                lineTo(currentPath[i].x, currentPath[i].y)
                             }
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
+
+                        if (toolMode == ToolMode.ERASE) {
+                            // Preview eraser as semi-transparent dark stroke
+                            drawPath(
+                                path = path,
+                                color = Color.Gray.copy(alpha = 0.5f),
+                                style = Stroke(
+                                    width = brushSize,
+                                    cap = StrokeCap.Round,
+                                    join = StrokeJoin.Round
+                                )
+                            )
+                        } else {
+                            drawPath(
+                                path = path,
+                                color = Color(brushColor),
+                                style = Stroke(
+                                    width = brushSize,
+                                    cap = StrokeCap.Round,
+                                    join = StrokeJoin.Round
+                                )
+                            )
+                        }
                     }
-                    Text("Size", color = Color.LightGray, fontSize = 9.sp)
-                    Slider(value = currentSize, onValueChange = { canvasEngine.setSize(it) }, valueRange = 1f..50f,
-                        modifier = Modifier.width(75.dp),
-                        colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF)))
+                }
+
+                // Info
+                Text(
+                    text = if (toolMode == ToolMode.ERASE) "Eraser (true Clear)" else "Draw",
+                    color = Color.White.copy(0.7f),
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                )
+            }
+
+            // Layers panel
+            Column(
+                modifier = Modifier
+                    .width(120.dp)
+                    .fillMaxHeight()
+                    .background(Color(0xFF1A1A1A))
+                    .padding(6.dp)
+            ) {
+                Text("Layers", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+
+                layers.asReversed().forEach { layer ->
+                    val active = layer.id == activeLayerId
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (active) Color(0xFF3A2A5A) else Color.Transparent)
+                            .clickable { bitmapEngine.setActiveLayer(layer.id) }
+                            .padding(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(if (layer.isVisible) Color(0xFF03DAC6) else Color.Gray)
+                                .clickable { bitmapEngine.toggleLayerVisibility(layer.id) }
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            layer.name,
+                            color = if (active) Color.White else Color.LightGray,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFF333333))
+                        .clickable { bitmapEngine.addLayer() }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("+ Layer", color = Color.White, fontSize = 11.sp)
                 }
             }
         }
 
-        // CANVAS
-        Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF2C2C2C))) {
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(timelineMode, isRecording, toolMode) {
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                if (timelineMode == TimelineMode.PERFORM && isRecording) {
-                                    timeline.recordPosition(offset.x, offset.y)
-                                } else {
-                                    canvasEngine.startStroke(StrokePoint(offset.x, offset.y, 1f))
-                                }
-                            },
-                            onDrag = { change, _ ->
-                                if (timelineMode == TimelineMode.PERFORM && isRecording) {
-                                    timeline.recordPosition(change.position.x, change.position.y)
-                                } else {
-                                    canvasEngine.addPointToStroke(StrokePoint(change.position.x, change.position.y, 1f))
-                                }
-                            },
-                            onDragEnd = {
-                                if (!(timelineMode == TimelineMode.PERFORM && isRecording)) {
-                                    val stroke = canvasEngine.endStroke()
-                                    stroke?.let { flipbookEngine.addStrokeToCurrentFrame(it) }
-                                }
-                            }
-                        )
+        // Bottom bar (timeline placeholder + modes)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .background(Color(0xFF111111))
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TimelineMode.values().forEach { mode ->
+                    val selected = timelineMode == mode
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(if (selected) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
+                            .clickable { timeline.setMode(mode) }
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(mode.name.take(3), color = Color.White, fontSize = 9.sp)
                     }
-            ) {
-                val cx = size.width / 2f
-                val cy = size.height / 2f
-
-                withTransform({
-                    translate(posX, posY)
-                    translate(cx, cy)
-                    rotate(rotation)
-                    scale(scale, scale)
-                    translate(-cx, -cy)
-                }) {
-                    flipbookEngine.getOnionSkinLayers().forEach { layer ->
-                        layer.strokes.forEach { stroke ->
-                            drawStrokeTinted(stroke, layer.color, layer.opacity * opacity)
-                        }
-                    }
-                    flipbookEngine.currentFrame?.strokes?.forEach { stroke ->
-                        drawStroke(stroke, opacity)
-                    }
-                }
-
-                if (currentStroke.size > 1 && !(timelineMode == TimelineMode.PERFORM && isRecording)) {
-                    val path = Path().apply {
-                        moveTo(currentStroke[0].x, currentStroke[0].y)
-                        for (i in 1 until currentStroke.size) lineTo(currentStroke[i].x, currentStroke[i].y)
-                    }
-                    val col = if (toolMode == ToolMode.ERASE) Color.Gray.copy(0.4f) else Color(currentColor)
-                    drawPath(path, col, style = Stroke(currentSize, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                }
-
-                if (timelineMode == TimelineMode.PERFORM || (posX != 0f || posY != 0f)) {
-                    drawCircle(Color.Red.copy(alpha = 0.7f), radius = 6f, center = Offset(cx + posX, cy + posY))
-                }
-            }
-
-            Column(modifier = Modifier.align(Alignment.TopStart).padding(6.dp)) {
-                Text("F ${flipbookFrameIndex + 1}/${flipbook.frameCount}", color = Color.White.copy(0.85f), fontSize = 11.sp)
-                if (timelineMode == TimelineMode.KEYFRAME || timelineMode == TimelineMode.PERFORM) {
-                    Text("Op:${(opacity*100).toInt()}% XY:(${posX.toInt()},${posY.toInt()}) S:${String.format("%.2f", scale)} R:${rotation.toInt()}°",
-                        color = Color(0xFF03DAC6), fontSize = 9.sp)
                 }
             }
 
             Text(
-                text = if (flipbook.onionSkinEnabled) "Onion ON" else "Onion OFF",
-                color = if (flipbook.onionSkinEnabled) Color(0xFF03DAC6) else Color.Gray,
-                fontSize = 9.sp,
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
-                    .clickable { flipbookEngine.setOnionSkinEnabled(!flipbook.onionSkinEnabled) }
+                "ImageBitmap + True Eraser", 
+                color = Color(0xFF03DAC6), 
+                fontSize = 10.sp
             )
-
-            if (isRecording) {
-                Text("● REC — Drag to perform", color = Color.Red, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp))
-            }
-        }
-
-        // TIMELINE
-        Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF0D0D0D))) {
-
-            Row(
-                modifier = Modifier.fillMaxWidth().height(30.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    TimelineMode.values().forEach { mode ->
-                        val sel = timelineMode == mode
-                        Box(modifier = Modifier.clip(RoundedCornerShape(3.dp))
-                            .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
-                            .clickable { timeline.setMode(mode) }
-                            .padding(horizontal = 5.dp, vertical = 2.dp)) {
-                            Text(mode.name.take(3), color = Color.White, fontSize = 9.sp)
-                        }
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    if (timelineMode == TimelineMode.KEYFRAME) {
-                        ToolButton("+Op") { timeline.addOrUpdateKeyframe(PropertyType.OPACITY, currentFrame, 1f) }
-                        ToolButton("Op0") { timeline.addOrUpdateKeyframe(PropertyType.OPACITY, currentFrame, 0f) }
-                        ToolButton("+Sc") { timeline.addOrUpdateKeyframe(PropertyType.SCALE, currentFrame, 1.3f) }
-                        ToolButton("+Rot") { timeline.addOrUpdateKeyframe(PropertyType.ROTATION, currentFrame, 25f) }
-                    }
-                    if (timelineMode == TimelineMode.PERFORM) {
-                        ToolButton(if (isRecording) "Stop" else "Rec", selected = isRecording) { timeline.toggleRecording() }
-                        ToolButton("Clr") { timeline.clearAllKeyframes(); statusMessage = "KFs cleared" }
-                    }
-                    ToolButton(if (isPlaying) "||" else ">") { timeline.togglePlay() }
-                    Text("$currentFrame/$durationFrames", color = Color.Gray, fontSize = 9.sp)
-                }
-            }
-
-            // Visual keyframe tracks
-            if (timelineMode == TimelineMode.KEYFRAME || timelineMode == TimelineMode.PERFORM) {
-                val activeProps = listOf(PropertyType.OPACITY, PropertyType.POSITION_X, PropertyType.SCALE, PropertyType.ROTATION)
-                Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-                    activeProps.forEach { prop ->
-                        val kfs = properties[prop]?.keyframes ?: emptyList()
-                        val trackColor = propColors[prop] ?: Color.Gray
-                        Row(modifier = Modifier.fillMaxWidth().height(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(prop.name.take(3), color = trackColor, fontSize = 8.sp, modifier = Modifier.width(26.dp))
-                            Box(modifier = Modifier.weight(1f).height(12.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF1E1E1E))) {
-                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                    val w = size.width
-                                    kfs.forEach { kf ->
-                                        val x = if (durationFrames > 0) (kf.frame.toFloat() / durationFrames) * w else 0f
-                                        val y = size.height / 2f
-                                        val path = Path().apply {
-                                            moveTo(x, y - 3.5f); lineTo(x + 3.5f, y); lineTo(x, y + 3.5f); lineTo(x - 3.5f, y); close()
-                                        }
-                                        drawPath(path, trackColor)
-                                    }
-                                    val px = if (durationFrames > 0) (currentFrame.toFloat() / durationFrames) * w else 0f
-                                    drawLine(Color(0xFFFF5252), Offset(px, 0f), Offset(px, size.height), strokeWidth = 1.5f)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Flipbook strip
-            Row(
-                modifier = Modifier.fillMaxWidth().height(26.dp).padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                ToolButton("|◀") { flipbookEngine.previousFrame() }
-                ToolButton("▶|") { flipbookEngine.nextFrame() }
-                ToolButton("+F") { flipbookEngine.addFrame() }
-                ToolButton("Dup") { flipbookEngine.duplicateCurrentFrame() }
-
-                Row(modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    flipbook.frames.forEachIndexed { index, _ ->
-                        val isCurrent = index == flipbookFrameIndex
-                        Box(modifier = Modifier.width(22.dp).height(16.dp).clip(RoundedCornerShape(2.dp))
-                            .background(if (isCurrent) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
-                            .clickable { flipbookEngine.setCurrentFrame(index) },
-                            contentAlignment = Alignment.Center) {
-                            Text("${index + 1}", color = Color.White, fontSize = 8.sp)
-                        }
-                    }
-                }
-            }
         }
     }
 }
 
 @Composable
-private fun ToolButton(text: String, selected: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    Box(modifier = Modifier.clip(RoundedCornerShape(3.dp))
-        .background(when {
-            selected -> Color(0xFF7C4DFF)
-            enabled -> Color(0xFF333333)
-            else -> Color(0xFF222222)
-        }).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 5.dp, vertical = 2.dp)) {
-        Text(text, color = if (enabled) Color.White else Color.Gray, fontSize = 9.sp)
+private fun ToolButton(
+    text: String,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(
+                when {
+                    selected -> Color(0xFF7C4DFF)
+                    enabled -> Color(0xFF333333)
+                    else -> Color(0xFF222222)
+                }
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 5.dp)
+    ) {
+        Text(text, color = if (enabled) Color.White else Color.Gray, fontSize = 11.sp)
     }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStroke(stroke: Stroke, opacity: Float) {
-    if (stroke.points.size < 2) return
-    val path = Path().apply {
-        moveTo(stroke.points[0].x, stroke.points[0].y)
-        for (i in 1 until stroke.points.size) lineTo(stroke.points[i].x, stroke.points[i].y)
-    }
-    if (stroke.brushId == "eraser") {
-        drawPath(path, Color.DarkGray.copy(alpha = 0.3f * opacity), style = Stroke(stroke.size, cap = StrokeCap.Round, join = StrokeJoin.Round))
-    } else {
-        drawPath(path, Color(stroke.color).copy(alpha = opacity * stroke.opacity), style = Stroke(stroke.size, cap = StrokeCap.Round, join = StrokeJoin.Round))
-    }
-}
-
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokeTinted(stroke: Stroke, tint: Long, opacity: Float) {
-    if (stroke.points.size < 2) return
-    val path = Path().apply {
-        moveTo(stroke.points[0].x, stroke.points[0].y)
-        for (i in 1 until stroke.points.size) lineTo(stroke.points[i].x, stroke.points[i].y)
-    }
-    drawPath(path, Color(tint).copy(alpha = opacity), style = Stroke(stroke.size, cap = StrokeCap.Round, join = StrokeJoin.Round))
 }

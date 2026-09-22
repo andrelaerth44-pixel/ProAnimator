@@ -1,39 +1,47 @@
-# Phase 3 — Export Foundation
+# Phase 3 — ImageBitmap + True Eraser
 
 ## What was delivered
 
-### ExportEngine
-- Core rendering function (`renderFrame`) using Android Canvas + Bitmap
-- **PNG Sequence export** (full flipbook)
-- **Single frame export** (current frame as PNG)
-- Progress callback
-- Transparent background support
-- Architecture ready for MediaCodec (MP4) later
+### LayerBitmapEngine
+- Each layer owns a real `ImageBitmap` (ARGB_8888)
+- Drawing happens **directly on the bitmap**
+- **True eraser** using `BlendMode.Clear`
+- `saveLayer` / `restore` for correct blend isolation
+- `CompositingStrategy.Offscreen` on the Compose Canvas (critical for Clear to work)
+- Checkerboard background so transparency is visible
+- Undo / Redo via bitmap snapshots (30 steps)
+- Multiple layers with visibility toggle
 
-### UI
-- **Export** button → exports entire Flipbook as PNG sequence
-- **Frame** button → exports only the current frame
-- Progress bar during export
-- Status messages
+### Research applied
+- SmartToolFactory Compose Drawing patterns
+- Android official BlendMode.Clear docs
+- `graphicsLayer { compositingStrategy = Offscreen }` requirement
+- Native canvas `saveLayer` for blend isolation
 
-### Output location
-Files are saved to:
-`Android/data/com.proanimator.app/files/exports/`
+## How to test the true eraser
 
-## How to use
+1. Draw something with a bright color
+2. Switch to **Eraser**
+3. Erase over the drawing
+4. You should see the checkerboard background through the erased area (true transparency)
 
-1. Create several frames in the Flipbook
-2. Draw on them
-3. Press **Export** → generates `frame_0000.png`, `frame_0001.png`...
-4. Or press **Frame** to export only the current frame
+## Current status
 
-## Next in Phase 3
+| Feature                        | Status      |
+|--------------------------------|-------------|
+| ImageBitmap per layer          | ✅          |
+| True eraser (BlendMode.Clear)  | ✅          |
+| Offscreen compositing          | ✅          |
+| Undo/Redo on bitmaps           | ✅          |
+| Checkerboard transparency      | ✅          |
+| PNG Sequence export            | ✅ (prev)   |
+| MP4 export                     | Pending     |
+| .pan format                    | Pending     |
+| Full Save/Load                 | Pending     |
 
-1. Real ImageBitmap / hardware-accelerated layer rendering (performance + proper eraser)
+## Next
+
+1. Integrate bitmap layers with Flipbook frames
 2. MP4 export via MediaCodec
-3. `.pan` binary format (streaming + undo history)
-4. Better project save/load that includes Flipbook + Keyframes
-
----
-
-**Phase 3 started strong.**
+3. Complete project Save/Load
+4. .pan binary format
