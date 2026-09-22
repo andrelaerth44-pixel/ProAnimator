@@ -1,43 +1,53 @@
-# Phase 3 — Flipbook + ImageBitmap Integration
+# Phase 3 — MP4 Export LIVE
 
 ## What was delivered
 
-### FlipbookBitmapEngine
-- Every Flipbook frame owns a real `ImageBitmap`
-- Drawing and **true eraser** (`BlendMode.Clear`) work per-frame
-- Onion Skin reads previous/next frame bitmaps (red = past, green = future)
-- Frame navigation (add, dup, delete, prev/next)
-- Undo/Redo per-frame bitmap snapshots
-- Playback syncs timeline → flipbook frames
-- Checkerboard background for transparency visibility
-- `CompositingStrategy.Offscreen` for correct Clear blend
+### Mp4Encoder
+- H.264 (AVC) via MediaCodec
+- MediaMuxer → MP4 container
+- Automatic color-format detection (Planar preferred to avoid green stripes)
+- Bitmap → YUV420 conversion (BT.601)
+- Even dimension enforcement
+- Progress callbacks
+- EOS handling
 
-### Unified model
-Phase 2 Flipbook + Phase 3 ImageBitmap are now one engine.
+### Export UI
+- **MP4** button → encodes all Flipbook frames to `.mp4`
+- **PNG** button → PNG sequence
+- **Frame** button → single PNG
+- Live progress bar during export
 
-## How to test
+### Output
+```
+Android/data/com.proanimator.app/files/exports/
+  proanimator_<timestamp>.mp4
+  png_sequence_<timestamp>/
+  frame_<timestamp>.png
+```
 
-1. Draw on Frame 1
-2. Press **+F** or **▶|** to create/go to Frame 2
-3. Draw something else
-4. Turn **Onion ON** → see previous frame in red tint
-5. Use **Eraser** on any frame → true transparent erase (checkerboard shows)
-6. Press Play → frames advance automatically
+## How to test MP4
 
-## Status
+1. Create 3–10 frames and draw on them
+2. Press **MP4**
+3. Wait for progress bar
+4. File appears in app exports folder
 
-| Feature                              | Status |
-|--------------------------------------|--------|
-| ImageBitmap per Flipbook frame       | ✅     |
-| True eraser per frame                | ✅     |
-| Onion Skin with bitmaps              | ✅     |
-| Frame add/dup/delete                 | ✅     |
-| Playback sync                        | ✅     |
-| PNG Sequence export (ready to wire)  | ✅     |
-| MP4 export                           | Next   |
-| Full Save/Load                       | Pending|
-| .pan format                          | Pending|
+## Full Phase 3 status
 
-## Next
+| Feature                         | Status |
+|---------------------------------|--------|
+| ImageBitmap per Flipbook frame  | ✅     |
+| True eraser (BlendMode.Clear)   | ✅     |
+| Onion Skin with bitmaps         | ✅     |
+| PNG Sequence export             | ✅     |
+| **MP4 export (MediaCodec)**     | ✅     |
+| Save/Load completo              | Next   |
+| .pan binary format              | Later  |
 
-**MP4 export via MediaCodec** using the frame bitmaps from `getAllBitmaps()`.
+## AnimaX note
+
+[lynx-family/animax](https://github.com/lynx-family/animax) is a Lottie + Alpha Video *player* engine (C++). Useful as future reference for Lottie import / off-main-thread render, not a drop-in for our drawing Flipbook.
+
+---
+
+**Phase 3 core export is done.**
