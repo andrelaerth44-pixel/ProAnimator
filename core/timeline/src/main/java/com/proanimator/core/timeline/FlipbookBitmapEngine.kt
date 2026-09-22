@@ -2,18 +2,15 @@ package com.proanimator.core.timeline
 
 import android.graphics.Bitmap
 import android.graphics.PorterDuff
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.PaintingStyle
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.nativeCanvas
+import com.proanimator.core.brushes.BrushEngine
+import com.proanimator.core.brushes.BrushLibrary
+import com.proanimator.core.brushes.BrushPreset
 import com.proanimator.core.engine.ToolMode
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,14 +19,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.UUID
 
-/**
- * FlipbookBitmapEngine
- *
- * Each Flipbook frame owns a real ImageBitmap.
- * Drawing and erasing happen on the current frame's bitmap.
- * Onion skin reads previous/next frame bitmaps.
- * Supports full load of ProjectData frames.
- */
 class FlipbookBitmapEngine(
     val width: Int = 1920,
     val height: Int = 1080
@@ -39,6 +28,8 @@ class FlipbookBitmapEngine(
         val index: Int,
         val bitmap: ImageBitmap
     )
+
+    val brushEngine = BrushEngine()
 
     private val _frames = MutableStateFlow<List<Frame>>(
         listOf(Frame(index = 0, bitmap = createEmptyBitmap()))
@@ -56,12 +47,6 @@ class FlipbookBitmapEngine(
 
     private val _toolMode = MutableStateFlow(ToolMode.DRAW)
     val toolMode: StateFlow<ToolMode> = _toolMode.asStateFlow()
-
-    private val _brushSize = MutableStateFlow(12f)
-    val brushSize: StateFlow<Float> = _brushSize.asStateFlow()
-
-    private val _brushColor = MutableStateFlow(0xFFFFFFFF)
-    val brushColor: StateFlow<Long> = _brushColor.asStateFlow()
 
     private val _onionEnabled = MutableStateFlow(true)
     val onionEnabled: StateFlow<Boolean> = _onionEnabled.asStateFlow()
@@ -82,12 +67,29 @@ class FlipbookBitmapEngine(
         return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).asImageBitmap()
     }
 
-    fun setToolMode(mode: ToolMode) { _toolMode.value = mode }
-    fun setBrushSize(size: Float) { _brushSize.value = size.coerceIn(1f, 200f) }
-    fun setBrushColor(color: Long) {
-        _brushColor.value = color
-        _toolMode.value = ToolMode.DRAW
+    fun setToolMode(mode: ToolMode) {
+        _toolMode.value = mode
+        if (mode == ToolMode.ERASE) {
+            brushEngine.setBrush(BrushLibrary.ERASER)
+        } else if (brushEngine.activeBrush.value.isEraser) {
+            brushEngine.setBrush(BrushLibrary.PEN)
+        }
     }
+
+    fun setBrush(preset: BrushPreset) {
+        brushEngine.setBrush(preset)
+        _toolMode.value = if (preset.isEraser) ToolMode.ERASE else ToolMode.DRAW
+    }
+
+    fun setBrushColor(color: Long) {
+        brushEngine.setColor(color)
+        if (brushEngine.activeBrush.value.isEraser) {
+            brushEngine.setBrush(BrushLibrary.PEN)
+            _toolMode.value = ToolMode.DRAW
+        }
+    }
+
+    fun setSizeMultiplier(m: Float) = brushEngine.setSizeMultiplier(m)
     fun setOnionEnabled(enabled: Boolean) { _onionEnabled.value = enabled }
 
     fun setCurrentFrame(index: Int) {
@@ -117,8 +119,7 @@ class FlipbookBitmapEngine(
     fun duplicateCurrentFrame() {
         val current = currentFrame ?: return
         val copy = current.bitmap.asAndroidBitmap()
-            .copy(Bitmap.Config.ARGB_8888, true)
-            .asImageBitmap()
+            .copy(Bitmap.Config.ARGB_8888, true).asImageBitmap()
         val newIndex = _frames.value.size
         _frames.update { it + Frame(index = newIndex, bitmap = copy) }
         _currentIndex.value = newIndex
@@ -128,23 +129,19 @@ class FlipbookBitmapEngine(
         if (_frames.value.size <= 1) return
         val idx = _currentIndex.value
         _frames.update { list ->
-            list.filterIndexed { i, _ -> i != idx }
-                .mapIndexed { i, f -> f.copy(index = i) }
+            list.filterIndexed { i, _ -> i != idx }.mapIndexed { i, f -> f.copy(index = i) }
         }
         if (_currentIndex.value >= _frames.value.size) {
             _currentIndex.value = _frames.value.size - 1
         }
     }
 
-    /** Load a full project (from .pan) */
     fun loadFrames(bitmaps: List<ImageBitmap>, startIndex: Int = 0) {
         if (bitmaps.isEmpty()) return
         undoStack.clear()
         redoStack.clear()
         updateUndoRedo()
-        _frames.value = bitmaps.mapIndexed { i, bmp ->
-            Frame(index = i, bitmap = bmp)
-        }
+        _frames.value = bitmaps.mapIndexed { i, bmp -> Frame(index = i, bitmap = bmp) }
         _currentIndex.value = startIndex.coerceIn(0, bitmaps.size - 1)
         _currentPath.value = emptyList()
     }
@@ -158,7 +155,7 @@ class FlipbookBitmapEngine(
                 val last = current.last()
                 val dx = point.x - last.x
                 val dy = point.y - last.y
-                if (dx * dx + dy * dy > 1.5f) current + point else current
+                if (dx * dx + dy * dy > 1.2f) current + point else current
             }
         }
     }
@@ -169,40 +166,15 @@ class FlipbookBitmapEngine(
             _currentPath.value = emptyList()
             return
         }
-
         val frame = currentFrame ?: return
         pushUndo(frame.index, frame.bitmap)
 
-        val canvas = Canvas(frame.bitmap)
-        val path = Path().apply {
-            moveTo(points[0].x, points[0].y)
-            for (i in 1 until points.size) lineTo(points[i].x, points[i].y)
-        }
-
-        val paint = Paint().apply {
-            strokeWidth = _brushSize.value
-            strokeCap = StrokeCap.Round
-            strokeJoin = StrokeJoin.Round
-            style = PaintingStyle.Stroke
-            isAntiAlias = true
-        }
-
-        if (_toolMode.value == ToolMode.ERASE) {
-            paint.blendMode = BlendMode.Clear
-            paint.color = Color.Transparent
-        } else {
-            paint.blendMode = BlendMode.SrcOver
-            paint.color = Color(_brushColor.value)
-        }
-
-        canvas.nativeCanvas.saveLayer(null, null)
-        canvas.drawPath(path, paint)
-        canvas.nativeCanvas.restore()
+        // BrushEngine draws with pressure + smoothing onto the frame bitmap
+        brushEngine.drawStroke(frame.bitmap, points)
 
         _frames.update { list ->
             list.map { if (it.id == frame.id) it.copy(bitmap = frame.bitmap) else it }
         }
-
         _currentPath.value = emptyList()
         redoStack.clear()
         updateUndoRedo()
@@ -268,7 +240,6 @@ class FlipbookBitmapEngine(
         val result = mutableListOf<OnionLayer>()
         val current = _currentIndex.value
         val frames = _frames.value
-
         val prevColors = listOf(Color(0xFFFF5252), Color(0xFFFF8A65), Color(0xFFFFAB91))
         for (i in 1.._onionBefore.value) {
             val idx = current - i
@@ -277,7 +248,6 @@ class FlipbookBitmapEngine(
                 result.add(OnionLayer(frames[idx].bitmap, prevColors.getOrElse(i - 1) { prevColors[0] }, alpha))
             }
         }
-
         val nextColors = listOf(Color(0xFF69F0AE), Color(0xFF00E676))
         for (i in 1.._onionAfter.value) {
             val idx = current + i
