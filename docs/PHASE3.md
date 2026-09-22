@@ -1,53 +1,50 @@
-# Phase 3 — MP4 Export LIVE
+# Phase 3 — COMPLETE (Export + Save/Load)
 
-## What was delivered
+## Delivered
 
-### Mp4Encoder
-- H.264 (AVC) via MediaCodec
-- MediaMuxer → MP4 container
-- Automatic color-format detection (Planar preferred to avoid green stripes)
-- Bitmap → YUV420 conversion (BT.601)
-- Even dimension enforcement
-- Progress callbacks
-- EOS handling
+### ImageBitmap + Eraser
+- Per-frame ImageBitmap
+- True eraser (BlendMode.Clear + Offscreen)
+- Onion Skin (red/green)
 
-### Export UI
-- **MP4** button → encodes all Flipbook frames to `.mp4`
-- **PNG** button → PNG sequence
-- **Frame** button → single PNG
-- Live progress bar during export
+### Export
+- PNG Sequence
+- MP4 via MediaCodec + MediaMuxer (H.264)
 
-### Output
+### Save/Load (.pan format)
 ```
-Android/data/com.proanimator.app/files/exports/
-  proanimator_<timestamp>.mp4
-  png_sequence_<timestamp>/
-  frame_<timestamp>.png
+MAGIC "PAN1"
+version, width, height, fps, currentFrame
+frameCount
+for each frame: PNG length + PNG bytes (lossless)
+meta JSON (timeline mode, onion, etc.)
 ```
+- GZIP compressed
+- Stored in app private `files/projects/`
+- **Save** / **Load** buttons in UI
+- Project list overlay
 
-## How to test MP4
+### FlipbookBitmapEngine.loadFrames()
+Restores full project from .pan into the engine.
 
-1. Create 3–10 frames and draw on them
-2. Press **MP4**
-3. Wait for progress bar
-4. File appears in app exports folder
+## How to test Save/Load
 
-## Full Phase 3 status
+1. Draw on several frames
+2. Press **Save** → creates `.pan`
+3. Press **Load** → list of projects appears
+4. Tap a project → frames restore with drawings intact
 
-| Feature                         | Status |
-|---------------------------------|--------|
-| ImageBitmap per Flipbook frame  | ✅     |
-| True eraser (BlendMode.Clear)   | ✅     |
-| Onion Skin with bitmaps         | ✅     |
-| PNG Sequence export             | ✅     |
-| **MP4 export (MediaCodec)**     | ✅     |
-| Save/Load completo              | Next   |
-| .pan binary format              | Later  |
+## Status
 
-## AnimaX note
+| Feature                    | Status |
+|----------------------------|--------|
+| ImageBitmap per frame      | ✅     |
+| True eraser                | ✅     |
+| Onion Skin                 | ✅     |
+| PNG export                 | ✅     |
+| MP4 export                 | ✅     |
+| **Save/Load (.pan)**       | ✅     |
+| Keyframe persistence       | Partial (meta ready) |
+| Bezier handles UX          | Future |
 
-[lynx-family/animax](https://github.com/lynx-family/animax) is a Lottie + Alpha Video *player* engine (C++). Useful as future reference for Lottie import / off-main-thread render, not a drop-in for our drawing Flipbook.
-
----
-
-**Phase 3 core export is done.**
+**Phase 3 core is done.**

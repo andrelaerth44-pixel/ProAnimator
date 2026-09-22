@@ -35,12 +35,14 @@ import androidx.compose.ui.unit.sp
 import com.proanimator.core.engine.ToolMode
 import com.proanimator.core.export.ExportEngine
 import com.proanimator.core.export.ExportProgress
+import com.proanimator.core.export.ProjectSerializer
 import com.proanimator.core.timeline.FlipbookBitmapEngine
 import com.proanimator.core.timeline.TimelineEngine
 import com.proanimator.core.timeline.TimelineMode
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 @Composable
 fun WorkspaceScreen() {
@@ -50,6 +52,7 @@ fun WorkspaceScreen() {
     val flipbook = remember { FlipbookBitmapEngine(width = 1920, height = 1080) }
     val timeline = remember { TimelineEngine() }
     val exportEngine = remember { ExportEngine(context) }
+    val serializer = remember { ProjectSerializer(context) }
 
     val frames by flipbook.frames.collectAsState()
     val currentIndex by flipbook.currentIndex.collectAsState()
@@ -67,6 +70,8 @@ fun WorkspaceScreen() {
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var isExporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableStateOf<ExportProgress?>(null) }
+    var showProjects by remember { mutableStateOf(false) }
+    var projectList by remember { mutableStateOf(serializer.listProjects()) }
 
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
@@ -82,14 +87,54 @@ fun WorkspaceScreen() {
         0xFFFFEB3B, 0xFF4CAF50, 0xFF2196F3, 0xFF9C27B0, 0xFFE91E63
     )
 
+    fun doSave() {
+        scope.launch {
+            statusMessage = "Saving…"
+            val meta = JSONObject().apply {
+                put("timelineMode", timelineMode.name)
+                put("onionEnabled", onionEnabled)
+                put("frameCount", frames.size)
+            }
+            val data = ProjectSerializer.ProjectData(
+                width = flipbook.width,
+                height = flipbook.height,
+                fps = timeline.fps.value,
+                currentFrameIndex = currentIndex,
+                frames = flipbook.getAllBitmaps(),
+                meta = meta
+            )
+            val result = serializer.save(data)
+            result.onSuccess {
+                statusMessage = "Saved: ${it.name}"
+                projectList = serializer.listProjects()
+            }.onFailure {
+                statusMessage = "Save failed: ${it.message?.take(30)}"
+            }
+        }
+    }
+
+    fun doLoad(file: java.io.File) {
+        scope.launch {
+            statusMessage = "Loading…"
+            val result = serializer.load(file)
+            result.onSuccess { data ->
+                flipbook.loadFrames(data.frames, data.currentFrameIndex)
+                // Apply fps if timeline supports it
+                statusMessage = "Loaded: ${file.name} (${data.frames.size} frames)"
+                showProjects = false
+            }.onFailure {
+                statusMessage = "Load failed: ${it.message?.take(30)}"
+            }
+        }
+    }
+
     fun doExportMp4() {
         if (isExporting) return
         isExporting = true
         statusMessage = "Exporting MP4…"
         scope.launch {
-            val bitmaps = flipbook.getAllBitmaps()
             val result = exportEngine.exportMp4(
-                bitmaps = bitmaps,
+                bitmaps = flipbook.getAllBitmaps(),
                 width = flipbook.width,
                 height = flipbook.height,
                 fps = timeline.fps.value,
@@ -97,11 +142,8 @@ fun WorkspaceScreen() {
             )
             isExporting = false
             exportProgress = null
-            result.onSuccess { file ->
-                statusMessage = "MP4 saved: ${file.name}"
-            }.onFailure {
-                statusMessage = "MP4 failed: ${it.message?.take(40)}"
-            }
+            result.onSuccess { statusMessage = "MP4: ${it.name}" }
+                .onFailure { statusMessage = "MP4 fail: ${it.message?.take(30)}" }
         }
     }
 
@@ -115,20 +157,8 @@ fun WorkspaceScreen() {
             )
             isExporting = false
             exportProgress = null
-            result.onSuccess { dir ->
-                statusMessage = "PNG seq: ${dir.name}"
-            }.onFailure {
-                statusMessage = "PNG failed"
-            }
-        }
-    }
-
-    fun doExportFrame() {
-        scope.launch {
-            val bmp = frames.getOrNull(currentIndex)?.bitmap ?: return@launch
-            val result = exportEngine.exportCurrentFrameAsPng(bmp)
-            result.onSuccess { statusMessage = "Frame saved" }
-                .onFailure { statusMessage = "Frame failed" }
+            result.onSuccess { statusMessage = "PNG: ${it.name}" }
+                .onFailure { statusMessage = "PNG fail" }
         }
     }
 
@@ -136,24 +166,58 @@ fun WorkspaceScreen() {
 
         // TOP BAR
         Row(
-            modifier = Modifier.fillMaxWidth().height(40.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
+            modifier = Modifier.fillMaxWidth().height(40.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 ToolButton("Draw", selected = toolMode == ToolMode.DRAW) { flipbook.setToolMode(ToolMode.DRAW) }
                 ToolButton("Eraser", selected = toolMode == ToolMode.ERASE) { flipbook.setToolMode(ToolMode.ERASE) }
                 ToolButton("Undo", enabled = canUndo) { flipbook.undo() }
                 ToolButton("Redo", enabled = canRedo) { flipbook.redo() }
+                ToolButton("Save") { doSave() }
+                ToolButton("Load") {
+                    projectList = serializer.listProjects()
+                    showProjects = !showProjects
+                }
                 ToolButton("MP4") { doExportMp4() }
                 ToolButton("PNG") { doExportPng() }
-                ToolButton("Frame") { doExportFrame() }
             }
         }
 
-        // Progress / status
+        // Project list overlay
+        if (showProjects) {
+            Column(
+                modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(8.dp)
+            ) {
+                Text("Projects (.pan)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(4.dp))
+                if (projectList.isEmpty()) {
+                    Text("No saved projects", color = Color.Gray, fontSize = 11.sp)
+                } else {
+                    projectList.take(8).forEach { file ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { doLoad(file) }
+                                .padding(vertical = 6.dp, horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(file.name, color = Color(0xFF03DAC6), fontSize = 11.sp)
+                            Text("${file.length() / 1024} KB", color = Color.Gray, fontSize = 10.sp)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Close", color = Color.LightGray, fontSize = 11.sp,
+                    modifier = Modifier.clickable { showProjects = false })
+            }
+        }
+
         if (isExporting && exportProgress != null) {
             Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 4.dp)) {
                 Text(exportProgress!!.message, color = Color(0xFF03DAC6), fontSize = 10.sp)
@@ -172,30 +236,30 @@ fun WorkspaceScreen() {
             statusMessage?.let {
                 Text(it, color = Color(0xFF03DAC6), fontSize = 10.sp,
                     modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 10.dp, vertical = 2.dp))
-                LaunchedEffect(it) { delay(2500); statusMessage = null }
+                LaunchedEffect(it) { delay(2800); statusMessage = null }
             }
         }
 
         // TOOLS
-        Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(vertical = 4.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(vertical = 3.dp)) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (toolMode == ToolMode.DRAW) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         colors.forEach { c ->
                             val selected = brushColor == c
-                            Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(Color(c))
+                            Box(modifier = Modifier.size(15.dp).clip(CircleShape).background(Color(c))
                                 .border(if (selected) 2.dp else 1.dp, if (selected) Color.White else Color.Gray, CircleShape)
                                 .clickable { flipbook.setBrushColor(c) })
                         }
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                 }
                 Text(if (toolMode == ToolMode.ERASE) "Eraser" else "Size", color = Color.LightGray, fontSize = 10.sp)
                 Slider(
                     value = brushSize,
                     onValueChange = { flipbook.setBrushSize(it) },
                     valueRange = 1f..80f,
-                    modifier = Modifier.width(90.dp),
+                    modifier = Modifier.width(80.dp),
                     colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF))
                 )
                 Text("${brushSize.toInt()}", color = Color.White, fontSize = 10.sp)
@@ -204,7 +268,6 @@ fun WorkspaceScreen() {
 
         // CANVAS
         Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color(0xFF2C2C2C))) {
-
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val cell = 16f
                 var y = 0f; var row = 0
@@ -260,7 +323,7 @@ fun WorkspaceScreen() {
 
             Column(modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
                 Text("Frame ${currentIndex + 1} / ${frames.size}", color = Color.White.copy(0.85f), fontSize = 12.sp)
-                Text(if (toolMode == ToolMode.ERASE) "Eraser (Clear)" else "Draw", color = Color.White.copy(0.6f), fontSize = 10.sp)
+                Text(if (toolMode == ToolMode.ERASE) "Eraser" else "Draw", color = Color.White.copy(0.6f), fontSize = 10.sp)
             }
 
             Text(
@@ -275,7 +338,7 @@ fun WorkspaceScreen() {
         // BOTTOM
         Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF111111))) {
             Row(
-                modifier = Modifier.fillMaxWidth().height(30.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
+                modifier = Modifier.fillMaxWidth().height(28.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -294,7 +357,7 @@ fun WorkspaceScreen() {
             }
 
             Row(
-                modifier = Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 6.dp),
+                modifier = Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
@@ -308,7 +371,7 @@ fun WorkspaceScreen() {
                     horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     frames.forEachIndexed { index, _ ->
                         val isCurrent = index == currentIndex
-                        Box(modifier = Modifier.width(26.dp).height(22.dp).clip(RoundedCornerShape(3.dp))
+                        Box(modifier = Modifier.width(24.dp).height(20.dp).clip(RoundedCornerShape(3.dp))
                             .background(if (isCurrent) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
                             .clickable { flipbook.setCurrentFrame(index) },
                             contentAlignment = Alignment.Center) {
@@ -328,7 +391,7 @@ private fun ToolButton(text: String, selected: Boolean = false, enabled: Boolean
             selected -> Color(0xFF7C4DFF)
             enabled -> Color(0xFF333333)
             else -> Color(0xFF222222)
-        }).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 6.dp, vertical = 3.dp)) {
-        Text(text, color = if (enabled) Color.White else Color.Gray, fontSize = 10.sp)
+        }).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 5.dp, vertical = 3.dp)) {
+        Text(text, color = if (enabled) Color.White else Color.Gray, fontSize = 9.sp)
     }
 }

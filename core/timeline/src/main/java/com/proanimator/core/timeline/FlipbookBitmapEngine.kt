@@ -28,8 +28,7 @@ import java.util.UUID
  * Each Flipbook frame owns a real ImageBitmap.
  * Drawing and erasing happen on the current frame's bitmap.
  * Onion skin reads previous/next frame bitmaps.
- *
- * This unifies Phase 2 Flipbook with Phase 3 ImageBitmap engine.
+ * Supports full load of ProjectData frames.
  */
 class FlipbookBitmapEngine(
     val width: Int = 1920,
@@ -70,8 +69,7 @@ class FlipbookBitmapEngine(
     private val _onionBefore = MutableStateFlow(2)
     private val _onionAfter = MutableStateFlow(1)
 
-    // Undo: per-frame bitmap snapshots
-    private val undoStack = mutableListOf<Pair<Int, Bitmap>>() // frameIndex to bitmap copy
+    private val undoStack = mutableListOf<Pair<Int, Bitmap>>()
     private val redoStack = mutableListOf<Pair<Int, Bitmap>>()
 
     private val _canUndo = MutableStateFlow(false)
@@ -109,9 +107,7 @@ class FlipbookBitmapEngine(
         _currentPath.value = emptyList()
     }
 
-    fun previousFrame() {
-        setCurrentFrame(_currentIndex.value - 1)
-    }
+    fun previousFrame() { setCurrentFrame(_currentIndex.value - 1) }
 
     fun addFrame() {
         val newIndex = _frames.value.size
@@ -140,9 +136,20 @@ class FlipbookBitmapEngine(
         }
     }
 
-    fun startStroke(point: StrokePoint) {
-        _currentPath.value = listOf(point)
+    /** Load a full project (from .pan) */
+    fun loadFrames(bitmaps: List<ImageBitmap>, startIndex: Int = 0) {
+        if (bitmaps.isEmpty()) return
+        undoStack.clear()
+        redoStack.clear()
+        updateUndoRedo()
+        _frames.value = bitmaps.mapIndexed { i, bmp ->
+            Frame(index = i, bitmap = bmp)
+        }
+        _currentIndex.value = startIndex.coerceIn(0, bitmaps.size - 1)
+        _currentPath.value = emptyList()
     }
+
+    fun startStroke(point: StrokePoint) { _currentPath.value = listOf(point) }
 
     fun addPoint(point: StrokePoint) {
         _currentPath.update { current ->
@@ -192,7 +199,6 @@ class FlipbookBitmapEngine(
         canvas.drawPath(path, paint)
         canvas.nativeCanvas.restore()
 
-        // Trigger recomposition
         _frames.update { list ->
             list.map { if (it.id == frame.id) it.copy(bitmap = frame.bitmap) else it }
         }
@@ -211,13 +217,10 @@ class FlipbookBitmapEngine(
     fun undo() {
         if (undoStack.isEmpty()) return
         val (frameIndex, bmp) = undoStack.removeAt(undoStack.lastIndex)
-
-        // Save current for redo
         val current = _frames.value.getOrNull(frameIndex)?.bitmap
         if (current != null) {
             redoStack.add(frameIndex to current.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true))
         }
-
         restoreFrameBitmap(frameIndex, bmp)
         updateUndoRedo()
     }
@@ -225,12 +228,10 @@ class FlipbookBitmapEngine(
     fun redo() {
         if (redoStack.isEmpty()) return
         val (frameIndex, bmp) = redoStack.removeAt(redoStack.lastIndex)
-
         val current = _frames.value.getOrNull(frameIndex)?.bitmap
         if (current != null) {
             undoStack.add(frameIndex to current.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true))
         }
-
         restoreFrameBitmap(frameIndex, bmp)
         updateUndoRedo()
     }
@@ -238,9 +239,7 @@ class FlipbookBitmapEngine(
     private fun restoreFrameBitmap(frameIndex: Int, bmp: Bitmap) {
         _frames.update { list ->
             list.map { frame ->
-                if (frame.index == frameIndex) {
-                    frame.copy(bitmap = bmp.asImageBitmap())
-                } else frame
+                if (frame.index == frameIndex) frame.copy(bitmap = bmp.asImageBitmap()) else frame
             }
         }
     }
@@ -262,7 +261,6 @@ class FlipbookBitmapEngine(
         updateUndoRedo()
     }
 
-    /** Onion skin layers: previous = red tones, next = green tones */
     data class OnionLayer(val bitmap: ImageBitmap, val tint: Color, val alpha: Float)
 
     fun getOnionLayers(): List<OnionLayer> {
@@ -291,8 +289,5 @@ class FlipbookBitmapEngine(
         return result
     }
 
-    /** For export: return all frame bitmaps in order */
-    fun getAllBitmaps(): List<ImageBitmap> {
-        return _frames.value.map { it.bitmap }
-    }
+    fun getAllBitmaps(): List<ImageBitmap> = _frames.value.map { it.bitmap }
 }
