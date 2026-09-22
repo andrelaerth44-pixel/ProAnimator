@@ -1,50 +1,41 @@
-# Phase 4 — Brushes + Bezier Keyframes + Perform
+# Phase 4 — Brushes + Bezier UI + Keyframe Tracks
 
-## Research sources applied
+## Latest commit features
 
-- **Jetpack Ink** StockBrushes (pressure, marker, opacity curves)
-- **SmartToolFactory** path properties + BlendMode.Clear
-- **DrawBox / ArtMaker** pressure sampling ideas
-- **Compose CubicBezierEasing** + CSS cubic-bezier Newton solve
-- **keyframesWithSpline** concept for smooth multi-keyframe motion
+### BezierEditor
+- Visual unit-square editor with draggable P1/P2 handles
+- Live cubic curve preview
+- Presets: Ease, In, Out, InOut, Linear
+- Values feed into Keyframe(bx1,by1,bx2,by2)
 
-## Delivered
+### KeyframeTrackStrip
+- Property tabs: POS_X, POS_Y, SCALE, ROTATION, OPACITY
+- Diamond markers on track (color by easing type)
+- +KF adds keyframe at current frame with selected easing
+- Click keyframe to load Bezier handles into editor
 
-### BrushPreset + BrushLibrary
-| Brush | Behavior |
-|-------|----------|
-| Pen | Pressure → size |
-| Pencil | Pressure → size + opacity |
-| Marker | Wide, semi-transparent |
-| Soft | Soft edge, low opacity |
-| Ink | High size variation with pressure |
-| Eraser | BlendMode.Clear |
+### Easing picker bar
+- LINEAR | EASE_IN | EASE_OUT | EASE_IN_OUT | HOLD | BEZIER
 
-### StrokeSmoother
-- Distance filter
-- EMA smoothing tunable per brush
+### Perform + playback
+- REC still records drag position
+- Play evaluates all tracks including Bezier interpolation
 
-### BrushEngine
-- Draws pressure-aware strokes onto ImageBitmap
-- Compatible with Flipbook + true eraser + MP4/PNG export
+## How to use Bezier keyframes
 
-### KeyframeInterpolator
-- LINEAR, EASE_IN/OUT/IN_OUT, HOLD
-- **BEZIER** with (x1,y1,x2,y2) control points
-- Newton-Raphson cubic solve (CSS-accurate)
+1. Open **Bezier** panel
+2. Drag red (P1) / green (P2) handles or tap presets
+3. Select property (e.g. POS_X)
+4. Move to desired frame, press **+KF**
+5. Play — motion uses cubic Bezier easing
 
-### PerformEngine
-- Records POS_X, POS_Y, SCALE, ROTATION, OPACITY
-- Live evaluate at playhead
-- Drag-to-record position
+## Status
 
-## Integration notes
-
-Wire `BrushEngine` into `FlipbookBitmapEngine.endStroke()` and
-`PerformEngine.evaluate(frame)` on timeline tick.
-
-## Next
-
-- UI brush picker chips
-- Visual Bezier handle editor
-- Jetpack Ink optional path (advanced)
+| Feature | Status |
+|---------|--------|
+| Brush presets + smoothing | ✅ |
+| Cubic Bezier math | ✅ |
+| Bezier handle UI | ✅ |
+| Keyframe track strip | ✅ |
+| Perform multi-property | ✅ |
+| Save keyframes into .pan | Partial (meta ready) |
