@@ -4,7 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -32,16 +33,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.proanimator.core.brushes.BrushLibrary
+import com.proanimator.core.engine.CanvasViewport
+import com.proanimator.core.engine.detectPressureStroke
 import com.proanimator.core.export.ExportEngine
 import com.proanimator.core.export.ProjectSerializer
+import com.proanimator.core.ink.InkBridge
+import com.proanimator.core.lottie.LottieFrameImporter
 import com.proanimator.core.timeline.AnimProperty
 import com.proanimator.core.timeline.EasingType
 import com.proanimator.core.timeline.FlipbookBitmapEngine
-import com.proanimator.core.timeline.Keyframe
 import com.proanimator.core.timeline.PerformEngine
 import com.proanimator.core.timeline.TimelineEngine
 import com.proanimator.core.timeline.TimelineMode
-import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -55,6 +58,11 @@ fun WorkspaceScreen() {
     val perform = remember { PerformEngine() }
     val exportEngine = remember { ExportEngine(context) }
     val serializer = remember { ProjectSerializer(context) }
+    val lottieImporter = remember { LottieFrameImporter(context) }
+    val viewport = remember { CanvasViewport(1920f, 1080f) }
+
+    var viewScale by remember { mutableFloatStateOf(1f) }
+    var viewOffset by remember { mutableStateOf(Offset.Zero) }
 
     val frames by flipbook.frames.collectAsState()
     val currentIndex by flipbook.currentIndex.collectAsState()
@@ -111,9 +119,8 @@ fun WorkspaceScreen() {
     }
 
     fun addKf(prop: AnimProperty, frame: Int) {
-        val value = currentValueFor(prop)
         perform.addKeyframe(
-            prop, frame, value, selectedEasing,
+            prop, frame, currentValueFor(prop), selectedEasing,
             bezierX1, bezierY1, bezierX2, bezierY2
         )
         statusMessage = "KF ${prop.name} @ F$frame"
@@ -121,47 +128,58 @@ fun WorkspaceScreen() {
 
     fun doSave() {
         scope.launch {
-            statusMessage = "Saving…"
             val meta = ProjectSerializer.buildMeta(
-                brushId = activeBrush.id,
-                onionEnabled = onionEnabled,
-                timelineMode = timelineMode.name,
-                perform = perform
+                activeBrush.id, onionEnabled, timelineMode.name, perform
             )
-            val data = ProjectSerializer.ProjectData(
-                width = flipbook.width,
-                height = flipbook.height,
-                fps = timeline.fps.value,
-                currentFrameIndex = currentIndex,
-                frames = flipbook.getAllBitmaps(),
-                meta = meta
-            )
-            serializer.save(data).onSuccess {
+            serializer.save(
+                ProjectSerializer.ProjectData(
+                    flipbook.width, flipbook.height, timeline.fps.value,
+                    currentIndex, flipbook.getAllBitmaps(), meta
+                )
+            ).onSuccess {
                 statusMessage = "Saved ${it.name} (${perform.keyframeCount()} KFs)"
                 projectList = serializer.listProjects()
-            }.onFailure {
-                statusMessage = "Save failed: ${it.message?.take(40)}"
-            }
+            }.onFailure { statusMessage = "Save fail" }
         }
     }
 
     fun doLoad(file: java.io.File) {
         scope.launch {
-            statusMessage = "Loading…"
             serializer.load(file).onSuccess { data ->
                 flipbook.loadFrames(data.frames, data.currentFrameIndex)
                 val extras = ProjectSerializer.applyMeta(data.meta, perform)
                 flipbook.setOnionEnabled(extras.onionEnabled)
                 BrushLibrary.ALL.find { it.id == extras.brushId }?.let { flipbook.setBrush(it) }
-                try {
-                    timeline.setMode(TimelineMode.valueOf(extras.timelineMode))
-                } catch (_: Exception) {}
+                try { timeline.setMode(TimelineMode.valueOf(extras.timelineMode)) } catch (_: Exception) {}
                 perform.evaluate(data.currentFrameIndex.toFloat())
-                statusMessage =
-                    "Loaded ${data.frames.size} frames, ${perform.keyframeCount()} KFs"
+                statusMessage = "Loaded ${data.frames.size}f / ${perform.keyframeCount()} KF"
                 showProjects = false
-            }.onFailure {
-                statusMessage = "Load failed: ${it.message?.take(40)}"
+            }.onFailure { statusMessage = "Load fail" }
+        }
+    }
+
+    fun doImportLottie() {
+        scope.launch {
+            statusMessage = "Import Lottie…"
+            // Demo: try common asset names; user can place JSON in assets/
+            val candidates = listOf("demo.json", "animation.json", "lottie.json")
+            var done = false
+            for (name in candidates) {
+                val result = lottieImporter.importFromAssets(
+                    name,
+                    targetWidth = flipbook.width,
+                    targetHeight = flipbook.height,
+                    maxFrames = 60
+                )
+                result.onSuccess { imp ->
+                    flipbook.loadFrames(imp.frames, 0)
+                    statusMessage = "Lottie: ${imp.name} ${imp.frames.size} frames @${imp.fps}fps"
+                    done = true
+                }
+                if (done) break
+            }
+            if (!done) {
+                statusMessage = "Put .json in assets/ as demo.json (Lottie)"
             }
         }
     }
@@ -173,7 +191,7 @@ fun WorkspaceScreen() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 ToolButton("Undo", enabled = canUndo) { flipbook.undo() }
                 ToolButton("Redo", enabled = canRedo) { flipbook.redo() }
@@ -186,32 +204,27 @@ fun WorkspaceScreen() {
                     scope.launch {
                         exportEngine.exportMp4(
                             flipbook.getAllBitmaps(), flipbook.width, flipbook.height, timeline.fps.value
-                        ).onSuccess { statusMessage = "MP4: ${it.name}" }
-                            .onFailure { statusMessage = "MP4 fail" }
+                        ).onSuccess { statusMessage = "MP4 ok" }
                     }
+                }
+                ToolButton("Lottie") { doImportLottie() }
+                ToolButton("1:1") {
+                    viewport.reset()
+                    viewScale = 1f
+                    viewOffset = Offset.Zero
                 }
                 ToolButton("Bezier", selected = showBezier) { showBezier = !showBezier }
                 ToolButton(if (isRecording) "REC●" else "REC", selected = isRecording) {
                     perform.toggleRecording()
-                    statusMessage = if (perform.isRecording.value) "REC ON" else "REC OFF"
                 }
             }
         }
 
         if (showProjects) {
-            Column(Modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(8.dp)) {
-                Text("Projects (.pan)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                if (projectList.isEmpty()) {
-                    Text("None yet — Save first", color = Color.Gray, fontSize = 10.sp)
-                }
-                projectList.take(8).forEach { f ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { doLoad(f) }.padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(f.name, color = Color(0xFF03DAC6), fontSize = 11.sp)
-                        Text("${f.length() / 1024}KB", color = Color.Gray, fontSize = 9.sp)
-                    }
+            Column(Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(8.dp)) {
+                projectList.take(6).forEach { f ->
+                    Text(f.name, color = Color(0xFF03DAC6), fontSize = 11.sp,
+                        modifier = Modifier.clickable { doLoad(f) }.padding(4.dp))
                 }
                 Text("Close", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.clickable { showProjects = false })
             }
@@ -220,9 +233,10 @@ fun WorkspaceScreen() {
         statusMessage?.let {
             Text(it, color = Color(0xFF03DAC6), fontSize = 10.sp,
                 modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp, vertical = 2.dp))
-            LaunchedEffect(it) { delay(2500); statusMessage = null }
+            LaunchedEffect(it) { delay(2800); statusMessage = null }
         }
 
+        // Brush row
         Row(
             modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(horizontal = 6.dp, vertical = 3.dp)
                 .horizontalScroll(rememberScrollState()),
@@ -239,7 +253,6 @@ fun WorkspaceScreen() {
                 ) { Text(preset.name, color = Color.White, fontSize = 9.sp) }
             }
             if (!activeBrush.isEraser) {
-                Spacer(Modifier.width(4.dp))
                 colors.forEach { c ->
                     val sel = brushColor == c
                     Box(modifier = Modifier.size(13.dp).clip(CircleShape).background(Color(c))
@@ -247,19 +260,19 @@ fun WorkspaceScreen() {
                         .clickable { flipbook.setBrushColor(c) })
                 }
             }
-            Text("Sz", color = Color.Gray, fontSize = 9.sp)
             Slider(
                 value = sizeMul, onValueChange = { flipbook.setSizeMultiplier(it) },
                 valueRange = 0.5f..3f, modifier = Modifier.width(60.dp),
                 colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF))
             )
+            Text("${(viewScale * 100).toInt()}%", color = Color.Gray, fontSize = 9.sp)
+            Text(InkBridge.describe().take(12), color = Color(0xFF666666), fontSize = 8.sp)
         }
 
         Row(
             modifier = Modifier.fillMaxWidth().background(Color(0xFF1C1C1C)).padding(horizontal = 6.dp, vertical = 2.dp)
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Text("Ease:", color = Color.Gray, fontSize = 9.sp)
             EasingType.entries.forEach { e ->
@@ -275,6 +288,7 @@ fun WorkspaceScreen() {
 
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
             Box(modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFF2C2C2C))) {
+                // Checkerboard (screen space)
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cell = 16f
                     var y = 0f; var row = 0
@@ -292,57 +306,85 @@ fun WorkspaceScreen() {
                     }
                 }
 
+                // Drawing layer: zoom/pan via withTransform + dual pointer handlers
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer {
-                            compositingStrategy = CompositingStrategy.Offscreen
-                            translationX = perfX
-                            translationY = perfY
-                            scaleX = perfScale
-                            scaleY = perfScale
-                            rotationZ = perfRot
-                            alpha = perfOpacity.coerceIn(0.05f, 1f)
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        // Two-finger zoom/pan
+                        .pointerInput(Unit) {
+                            detectTransformGestures { centroid, pan, zoom, _ ->
+                                viewport.applyZoomPan(centroid, pan, zoom)
+                                viewScale = viewport.scale
+                                viewOffset = viewport.offset
+                            }
                         }
-                        .pointerInput(isRecording) {
-                            detectDragGestures(
-                                onDragStart = { o ->
-                                    if (!isRecording) flipbook.startStroke(StrokePoint(o.x, o.y, 1f))
-                                },
-                                onDrag = { c, amount ->
-                                    if (isRecording) perform.recordDrag(currentIndex, amount.x, amount.y)
-                                    else flipbook.addPoint(StrokePoint(c.position.x, c.position.y, 1f))
-                                },
-                                onDragEnd = { if (!isRecording) flipbook.endStroke() }
-                            )
+                        // One-finger / stylus pressure stroke
+                        .pointerInput(isRecording, viewScale, viewOffset) {
+                            if (isRecording) {
+                                detectTransformGestures { _, pan, _, _ ->
+                                    perform.recordDrag(currentIndex, pan.x / viewScale, pan.y / viewScale)
+                                }
+                            } else {
+                                detectPressureStroke(
+                                    onStart = { flipbook.startStroke(it) },
+                                    onMove = { flipbook.addPoint(it) },
+                                    onEnd = { flipbook.endStroke() },
+                                    toCanvas = { screen ->
+                                        // Inverse of view transform
+                                        Offset(
+                                            screen.x / viewScale - viewOffset.x,
+                                            screen.y / viewScale - viewOffset.y
+                                        )
+                                    }
+                                )
+                            }
                         }
                 ) {
-                    flipbook.getOnionLayers().forEach { layer ->
-                        drawImage(
-                            image = layer.bitmap, alpha = layer.alpha,
-                            colorFilter = ColorFilter.tint(layer.tint, androidx.compose.ui.graphics.BlendMode.SrcAtop)
-                        )
-                    }
-                    frames.getOrNull(currentIndex)?.let { drawImage(image = it.bitmap) }
-                    if (currentPath.size > 1 && !isRecording) {
-                        val path = Path().apply {
-                            moveTo(currentPath[0].x, currentPath[0].y)
-                            for (i in 1 until currentPath.size) lineTo(currentPath[i].x, currentPath[i].y)
+                    withTransform({
+                        scale(viewScale, viewScale)
+                        translate(viewOffset.x, viewOffset.y)
+                        // Perform transforms on content
+                        translate(perfX, perfY)
+                        scale(perfScale, perfScale)
+                        rotate(perfRot)
+                    }) {
+                        flipbook.getOnionLayers().forEach { layer ->
+                            drawImage(
+                                image = layer.bitmap,
+                                alpha = layer.alpha * perfOpacity.coerceIn(0.05f, 1f),
+                                colorFilter = ColorFilter.tint(
+                                    layer.tint,
+                                    androidx.compose.ui.graphics.BlendMode.SrcAtop
+                                )
+                            )
                         }
-                        drawPath(
-                            path,
-                            if (activeBrush.isEraser) Color.Gray.copy(0.4f) else Color(brushColor),
-                            style = Stroke(activeBrush.baseSize * sizeMul, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                        )
+                        frames.getOrNull(currentIndex)?.let {
+                            drawImage(image = it.bitmap, alpha = perfOpacity.coerceIn(0.05f, 1f))
+                        }
+                        if (currentPath.size > 1 && !isRecording) {
+                            val path = Path().apply {
+                                moveTo(currentPath[0].x, currentPath[0].y)
+                                for (i in 1 until currentPath.size) {
+                                    lineTo(currentPath[i].x, currentPath[i].y)
+                                }
+                            }
+                            val w = activeBrush.baseSize * sizeMul *
+                                (0.4f + 0.6f * (currentPath.lastOrNull()?.pressure ?: 1f))
+                            drawPath(
+                                path,
+                                if (activeBrush.isEraser) Color.Gray.copy(0.4f) else Color(brushColor),
+                                style = Stroke(w, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            )
+                        }
                     }
                 }
 
                 Column(modifier = Modifier.align(Alignment.TopStart).padding(6.dp)) {
                     Text("F${currentIndex + 1}/${frames.size}", color = Color.White.copy(0.85f), fontSize = 11.sp)
-                    Text(activeBrush.name, color = Color.White.copy(0.55f), fontSize = 9.sp)
+                    Text("${activeBrush.name} · pinch zoom", color = Color.White.copy(0.5f), fontSize = 9.sp)
                     if (isRecording) Text("PERFORM", color = Color.Red, fontSize = 9.sp)
-                    // force observe revision
-                    Text("${performRevision} KFs loaded", color = Color.Transparent, fontSize = 1.sp)
+                    Text("$performRevision", color = Color.Transparent, fontSize = 1.sp)
                 }
                 Text(
                     if (onionEnabled) "Onion" else "Off",
@@ -380,7 +422,6 @@ fun WorkspaceScreen() {
                     bezierX2 = kf.bx2; bezierY2 = kf.by2
                     showBezier = true
                 }
-                statusMessage = "KF F${kf.frame} ${kf.easing}"
             }
         )
 
