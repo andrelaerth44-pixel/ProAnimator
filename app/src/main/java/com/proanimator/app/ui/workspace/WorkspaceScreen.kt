@@ -1,3 +1,1 @@
-package com.proanimator.app.ui.workspace
-
-// PLACEHOLDER - will be replaced
+SEE_ARTIFACTS_WorkspaceScreen_TOO_LARGE_USE_GIT_SHOW_98d1ff0
