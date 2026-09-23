@@ -39,6 +39,9 @@ class FlipbookBitmapEngine(
     val brushEngine = BrushEngine()
     val warpEngine = WarpEngine(cols = 32, rows = 32)
 
+    /** Pencil2D-inspired LRU ranking of hot frames (original Kotlin). */
+    val framePool = ActiveFramePool(capacity = 24)
+
     private val _frames = MutableStateFlow(
         listOf(Frame(index = 0, layers = LayerStack(width, height)))
     )
@@ -161,9 +164,15 @@ class FlipbookBitmapEngine(
 
     fun setCurrentFrame(index: Int) {
         val max = (_frames.value.size - 1).coerceAtLeast(0)
-        _currentIndex.value = index.coerceIn(0, max)
+        val i = index.coerceIn(0, max)
+        _currentIndex.value = i
         _currentPath.value = emptyList()
         if (_warpMode.value) cancelWarp()
+        framePool.touchWindow(
+            i,
+            radius = (_onionBefore.value + _onionAfter.value).coerceAtLeast(2),
+            maxIndexExclusive = _frames.value.size
+        )
         bumpLayers()
     }
 
@@ -171,10 +180,8 @@ class FlipbookBitmapEngine(
         val next = _currentIndex.value + 1
         if (next >= _frames.value.size) {
             addFrame()
-            _currentIndex.value = _frames.value.size - 1
-        } else _currentIndex.value = next
-        _currentPath.value = emptyList()
-        bumpLayers()
+            setCurrentFrame(_frames.value.size - 1)
+        } else setCurrentFrame(next)
     }
 
     fun previousFrame() = setCurrentFrame(_currentIndex.value - 1)
@@ -182,6 +189,27 @@ class FlipbookBitmapEngine(
     fun addFrame() {
         val newIndex = _frames.value.size
         _frames.update { it + Frame(index = newIndex, layers = LayerStack(width, height)) }
+        framePool.touch(newIndex)
+    }
+
+    /** Append a pre-built layer stack (Frame Viewer paste). */
+    fun appendFrameWithStack(stack: LayerStack) {
+        val newIndex = _frames.value.size
+        _frames.update { it + Frame(index = newIndex, layers = stack) }
+        framePool.touch(newIndex)
+        bumpLayers()
+    }
+
+    /** Insert stack at [index], shifting later frames. */
+    fun insertFrameAt(index: Int, stack: LayerStack) {
+        val at = index.coerceIn(0, _frames.value.size)
+        _frames.update { list ->
+            val mutable = list.toMutableList()
+            mutable.add(at, Frame(index = at, layers = stack))
+            mutable.mapIndexed { i, f -> f.copy(index = i) }
+        }
+        framePool.touch(at)
+        bumpLayers()
     }
 
     fun duplicateCurrentFrame() {
@@ -190,8 +218,7 @@ class FlipbookBitmapEngine(
         stack.duplicateFrom(current.layers)
         val newIndex = _frames.value.size
         _frames.update { it + Frame(index = newIndex, layers = stack) }
-        _currentIndex.value = newIndex
-        bumpLayers()
+        setCurrentFrame(newIndex)
     }
 
     fun deleteCurrentFrame() {
@@ -200,7 +227,33 @@ class FlipbookBitmapEngine(
         _frames.update { list ->
             list.filterIndexed { i, _ -> i != idx }.mapIndexed { i, f -> f.copy(index = i) }
         }
-        if (_currentIndex.value >= _frames.value.size) _currentIndex.value = _frames.value.size - 1
+        if (_currentIndex.value >= _frames.value.size) {
+            _currentIndex.value = _frames.value.size - 1
+        }
+        framePool.clear()
+        framePool.touchWindow(_currentIndex.value, 2, _frames.value.size)
+        bumpLayers()
+    }
+
+    fun deleteFrames(indices: Collection<Int>) {
+        if (_frames.value.size <= 1) return
+        val remove = indices.filter { it in _frames.value.indices }.toSet()
+        if (remove.isEmpty()) return
+        if (remove.size >= _frames.value.size) {
+            // Keep at least one
+            val keep = 0
+            _frames.update { list ->
+                listOf(list[keep].copy(index = 0))
+            }
+            _currentIndex.value = 0
+        } else {
+            _frames.update { list ->
+                list.filterIndexed { i, _ -> i !in remove }.mapIndexed { i, f -> f.copy(index = i) }
+            }
+            _currentIndex.value = _currentIndex.value.coerceIn(0, _frames.value.lastIndex)
+        }
+        framePool.clear()
+        framePool.touch(_currentIndex.value)
         bumpLayers()
     }
 
@@ -217,27 +270,27 @@ class FlipbookBitmapEngine(
     fun loadFrames(bitmaps: List<ImageBitmap>, startIndex: Int = 0) {
         if (bitmaps.isEmpty()) return
         undoStack.clear(); redoStack.clear(); updateUndoRedo()
+        framePool.clear()
         _frames.value = bitmaps.mapIndexed { i, bmp ->
             val stack = LayerStack(width, height)
             stack.replaceActiveBitmap(bmp)
             Frame(index = i, layers = stack)
         }
-        _currentIndex.value = startIndex.coerceIn(0, bitmaps.size - 1)
+        setCurrentFrame(startIndex.coerceIn(0, bitmaps.size - 1))
         _currentPath.value = emptyList()
-        bumpLayers()
     }
 
     fun loadLayerStacks(stacks: List<LayerStack>, startIndex: Int = 0) {
         if (stacks.isEmpty()) return
         undoStack.clear(); redoStack.clear(); updateUndoRedo()
+        framePool.clear()
         _frames.value = stacks.mapIndexed { i, src ->
             val stack = LayerStack(width, height, initialLayers = 0)
             stack.replaceAll(src)
             Frame(index = i, layers = stack)
         }
-        _currentIndex.value = startIndex.coerceIn(0, stacks.size - 1)
+        setCurrentFrame(startIndex.coerceIn(0, stacks.size - 1))
         _currentPath.value = emptyList()
-        bumpLayers()
     }
 
     fun startStroke(point: StrokePoint) { _currentPath.value = listOf(point) }
@@ -295,7 +348,6 @@ class FlipbookBitmapEngine(
 
     fun undoDepth(): Int = undoStack.size
 
-    /** Encode undo stack for PAN meta (self-contained, no export module dep). */
     fun exportUndoArchive(maxDepth: Int = 8): JSONObject {
         val arr = JSONArray()
         undoStack.takeLast(maxDepth).forEach { (frame, bmp) ->
