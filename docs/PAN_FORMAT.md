@@ -1,62 +1,45 @@
 # ProAnimator `.pan` format
 
-## Container (binary, GZIP)
+## PAN2 (current)
 
 ```
-MAGIC          4 bytes  "PAN1"
-version        int32    1
+MAGIC          4 bytes  "PAN2"
+version        int32    2
 width          int32
 height         int32
 fps            float32
 currentFrame   int32
 frameCount     int32
 for each frame:
-  pngLength     int32
-  pngBytes      pngLength bytes   (lossless ARGB)
+  layerCount     int32
+  activeLayer    int32
+  for each layer:
+    name         UTF
+    visible      boolean
+    opacity      float32
+    pngLength    int32
+    pngBytes     (layer bitmap)
 metaLength     int32
-metaJson       metaLength bytes  (UTF-8 JSON)
+metaJson       UTF-8 JSON (schema 3: tracks, brush, onion, mode)
 ```
 
-## Meta JSON (schema 2)
+Container is **GZIP** compressed.
 
-```json
-{
-  "schema": 2,
-  "brushId": "pen",
-  "onionEnabled": true,
-  "timelineMode": "COMPOSE",
-  "tracks": {
-    "POS_X": [
-      {
-        "frame": 0,
-        "value": 0.0,
-        "easing": "BEZIER",
-        "bx1": 0.42,
-        "by1": 0.0,
-        "bx2": 0.58,
-        "by2": 1.0
-      }
-    ],
-    "POS_Y": [],
-    "SCALE": [],
-    "ROTATION": [],
-    "OPACITY": []
-  }
-}
-```
+## PAN1 (legacy, still loadable)
 
-## What Save/Load restores
+Composite PNG per frame + meta schema 2.
 
-| Data | Restored |
-|------|----------|
-| Flipbook frame bitmaps | ✅ PNG lossless |
-| Current frame index | ✅ |
-| FPS | ✅ |
-| All keyframe tracks + Bezier handles | ✅ |
-| Active brush id | ✅ |
-| Onion on/off | ✅ |
-| Timeline mode | ✅ |
+## What is restored
 
-## Location
+| Data | PAN2 |
+|------|------|
+| Per-layer bitmaps | ✅ |
+| Layer name / visible / opacity | ✅ |
+| Active layer index | ✅ |
+| Keyframes + Bezier | ✅ |
+| Brush, onion, timeline mode | ✅ |
 
-`context.filesDir/projects/*.pan`
+## Export
+
+- Internal: `filesDir/projects/*.pan`
+- SAF: **CreateDocument** → user-chosen location

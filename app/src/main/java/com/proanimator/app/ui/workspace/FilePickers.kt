@@ -9,19 +9,20 @@ import androidx.compose.runtime.remember
 import java.io.File
 import java.io.FileOutputStream
 
-/**
- * SAF pickers for Lottie JSON and .pan projects.
- */
 data class FilePickLaunchers(
     val pickLottie: () -> Unit,
-    val pickPan: () -> Unit
+    val pickPan: () -> Unit,
+    val createPan: (suggestedName: String) -> Unit,
+    val createMp4: (suggestedName: String) -> Unit
 )
 
 @Composable
 fun rememberFilePickLaunchers(
     context: Context,
     onLottieUri: (Uri) -> Unit,
-    onPanUri: (Uri) -> Unit
+    onPanUri: (Uri) -> Unit,
+    onCreatePanUri: (Uri) -> Unit,
+    onCreateMp4Uri: (Uri) -> Unit
 ): FilePickLaunchers {
     val lottieLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -31,13 +32,27 @@ fun rememberFilePickLaunchers(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(onPanUri) }
 
-    return remember(lottieLauncher, panLauncher) {
+    val createPanLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri -> uri?.let(onCreatePanUri) }
+
+    val createMp4Launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("video/mp4")
+    ) { uri -> uri?.let(onCreateMp4Uri) }
+
+    return remember(lottieLauncher, panLauncher, createPanLauncher, createMp4Launcher) {
         FilePickLaunchers(
             pickLottie = {
                 lottieLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
             },
             pickPan = {
                 panLauncher.launch(arrayOf("*/*", "application/octet-stream"))
+            },
+            createPan = { name ->
+                createPanLauncher.launch(if (name.endsWith(".pan")) name else "$name.pan")
+            },
+            createMp4 = { name ->
+                createMp4Launcher.launch(if (name.endsWith(".mp4")) name else "$name.mp4")
             }
         )
     }
