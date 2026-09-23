@@ -12,6 +12,7 @@ import java.io.FileOutputStream
 data class FilePickLaunchers(
     val pickLottie: () -> Unit,
     val pickPan: () -> Unit,
+    val pickAudio: () -> Unit,
     val createPan: (suggestedName: String) -> Unit,
     val createMp4: (suggestedName: String) -> Unit
 )
@@ -21,6 +22,7 @@ fun rememberFilePickLaunchers(
     context: Context,
     onLottieUri: (Uri) -> Unit,
     onPanUri: (Uri) -> Unit,
+    onAudioUri: (Uri) -> Unit = {},
     onCreatePanUri: (Uri) -> Unit,
     onCreateMp4Uri: (Uri) -> Unit
 ): FilePickLaunchers {
@@ -32,6 +34,10 @@ fun rememberFilePickLaunchers(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(onPanUri) }
 
+    val audioLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(onAudioUri) }
+
     val createPanLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri -> uri?.let(onCreatePanUri) }
@@ -40,13 +46,16 @@ fun rememberFilePickLaunchers(
         ActivityResultContracts.CreateDocument("video/mp4")
     ) { uri -> uri?.let(onCreateMp4Uri) }
 
-    return remember(lottieLauncher, panLauncher, createPanLauncher, createMp4Launcher) {
+    return remember(lottieLauncher, panLauncher, audioLauncher, createPanLauncher, createMp4Launcher) {
         FilePickLaunchers(
             pickLottie = {
                 lottieLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
             },
             pickPan = {
                 panLauncher.launch(arrayOf("*/*", "application/octet-stream"))
+            },
+            pickAudio = {
+                audioLauncher.launch(arrayOf("audio/*", "audio/mpeg", "audio/mp4", "audio/wav"))
             },
             createPan = { name ->
                 createPanLauncher.launch(if (name.endsWith(".pan")) name else "$name.pan")
