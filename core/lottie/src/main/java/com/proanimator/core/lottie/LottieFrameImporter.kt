@@ -18,11 +18,6 @@ import kotlin.math.max
 
 /**
  * Import Lottie JSON → sequence of ImageBitmaps for Flipbook.
- *
- * Research:
- * - airbnb/lottie-android LottieComposition + LottieDrawable
- * - Rasterize each frame to ARGB bitmap (AnimaX-inspired "bring AE assets in")
- * - Does NOT depend on AnimaX C++ engine; uses stable Lottie Android player
  */
 class LottieFrameImporter(private val context: Context) {
 
@@ -41,9 +36,9 @@ class LottieFrameImporter(private val context: Context) {
         maxFrames: Int = 120
     ): Result<ImportResult> = withContext(Dispatchers.IO) {
         try {
-            val task = LottieCompositionFactory.fromAsset(context, assetName)
-            val composition = task.result
-                ?: return@withContext Result.failure(IllegalStateException("Failed to parse $assetName"))
+            val result = LottieCompositionFactory.fromAssetSync(context, assetName)
+            val composition = result.value
+                ?: return@withContext Result.failure(result.exception ?: IllegalStateException("Failed to parse $assetName"))
             rasterize(composition, assetName, targetWidth, targetHeight, maxFrames)
         } catch (e: Exception) {
             Result.failure(e)
@@ -73,9 +68,9 @@ class LottieFrameImporter(private val context: Context) {
         maxFrames: Int = 120
     ): Result<ImportResult> = withContext(Dispatchers.IO) {
         try {
-            val task = LottieCompositionFactory.fromJsonInputStream(stream, name)
-            val composition = task.result
-                ?: return@withContext Result.failure(IllegalStateException("Failed to parse Lottie"))
+            val result = LottieCompositionFactory.fromJsonInputStreamSync(stream, name)
+            val composition = result.value
+                ?: return@withContext Result.failure(result.exception ?: IllegalStateException("Failed to parse $name"))
             rasterize(composition, name, targetWidth, targetHeight, maxFrames)
         } catch (e: Exception) {
             Result.failure(e)
@@ -97,13 +92,12 @@ class LottieFrameImporter(private val context: Context) {
 
         val durationFrames = composition.durationFrames
         val fps = composition.frameRate
-        val total = durationFrames.toInt().coerceAtLeast(1)
+        val total = ceil(durationFrames.toDouble()).toInt().coerceAtLeast(1)
         val step = if (total > maxFrames) total.toFloat() / maxFrames else 1f
         val count = minOf(total, maxFrames)
 
         val drawable = LottieDrawable().apply {
             setComposition(composition)
-            // Fit into target
             setBounds(0, 0, w, h)
         }
 
@@ -114,7 +108,6 @@ class LottieFrameImporter(private val context: Context) {
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             canvas.drawColor(Color.TRANSPARENT)
-            // Scale drawable to target size
             val scaleX = w.toFloat() / srcW
             val scaleY = h.toFloat() / srcH
             canvas.save()
