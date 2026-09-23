@@ -25,7 +25,8 @@ data class ExportSettings(
     val width: Int = 1920,
     val height: Int = 1080,
     val fps: Float = 24f,
-    val transparentBackground: Boolean = true
+    val transparentBackground: Boolean = true,
+    val useHevc: Boolean = false
 )
 
 data class ExportProgress(
@@ -102,6 +103,7 @@ class ExportEngine(private val context: Context) {
         width: Int = 1920,
         height: Int = 1080,
         fps: Float = 24f,
+        useHevc: Boolean = false,
         onProgress: (ExportProgress) -> Unit = {}
     ): Result<File> {
         return mp4Encoder.encode(
@@ -109,6 +111,7 @@ class ExportEngine(private val context: Context) {
             width = width,
             height = height,
             fps = fps,
+            useHevc = useHevc,
             onProgress = { p ->
                 onProgress(ExportProgress(p.current, p.total, p.message))
             }
@@ -116,8 +119,7 @@ class ExportEngine(private val context: Context) {
     }
 
     /**
-     * Encode video then optionally mux AAC audio from [audioUri].
-     * Non-AAC sources fall back to video-only.
+     * Video + optional audio (AAC direct or MP3→AAC via AacTranscoder).
      */
     suspend fun exportMp4WithAudio(
         bitmaps: List<ImageBitmap>,
@@ -125,9 +127,10 @@ class ExportEngine(private val context: Context) {
         height: Int = 1080,
         fps: Float = 24f,
         audioUri: Uri? = null,
+        useHevc: Boolean = false,
         onProgress: (ExportProgress) -> Unit = {}
     ): Result<File> = withContext(Dispatchers.IO) {
-        val videoResult = exportMp4(bitmaps, width, height, fps, onProgress)
+        val videoResult = exportMp4(bitmaps, width, height, fps, useHevc, onProgress)
         val videoFile = videoResult.getOrElse { return@withContext Result.failure(it) }
         if (audioUri == null) return@withContext Result.success(videoFile)
 
@@ -138,10 +141,7 @@ class ExportEngine(private val context: Context) {
         )
         AudioVideoMuxer.mux(context, videoFile, audioUri, out).fold(
             onSuccess = { Result.success(it) },
-            onFailure = {
-                // Fallback: keep video-only
-                Result.success(videoFile)
-            }
+            onFailure = { Result.success(videoFile) }
         )
     }
 
