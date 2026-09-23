@@ -29,13 +29,14 @@ fun LayerPanel(
     onToggleVisible: (Int) -> Unit,
     onOpacity: (Int, Float) -> Unit,
     onBlendMode: (Int, LayerBlendMode) -> Unit = { _, _ -> },
+    onToggleClip: (Int) -> Unit = {},
     onAdd: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
-            .width(140.dp)
+            .width(148.dp)
             .fillMaxHeight()
             .background(Color(0xFF1A1A1A))
             .padding(6.dp)
@@ -50,11 +51,7 @@ fun LayerPanel(
 
         val active = layers.getOrNull(activeIndex)
         if (active != null) {
-            Text(
-                "Opacity ${(active.opacity * 100).toInt()}%",
-                color = Color(0xFFBB86FC),
-                fontSize = 9.sp
-            )
+            Text("Opacity ${(active.opacity * 100).toInt()}%", color = Color(0xFFBB86FC), fontSize = 9.sp)
             Slider(
                 value = active.opacity,
                 onValueChange = { onOpacity(activeIndex, it) },
@@ -66,47 +63,42 @@ fun LayerPanel(
                     inactiveTrackColor = Color(0xFF333333)
                 )
             )
-            // Blend mode cycle
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(3.dp))
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp))
                     .background(Color(0xFF2A2A2A))
                     .clickable {
                         val modes = LayerBlendMode.entries
-                        val next = modes[(active.blendMode.ordinal + 1) % modes.size]
-                        onBlendMode(activeIndex, next)
+                        onBlendMode(activeIndex, modes[(active.blendMode.ordinal + 1) % modes.size])
                     }
                     .padding(horizontal = 6.dp, vertical = 4.dp)
             ) {
+                Text("Blend: ${active.blendMode.name.take(8)}", color = Color(0xFF03DAC6), fontSize = 9.sp)
+            }
+            Spacer(Modifier.height(3.dp))
+            Box(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp))
+                    .background(if (active.clipToBelow) Color(0xFF4A148C) else Color(0xFF2A2A2A))
+                    .clickable { onToggleClip(activeIndex) }
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            ) {
                 Text(
-                    "Blend: ${active.blendMode.name.take(8)}",
-                    color = Color(0xFF03DAC6),
+                    if (active.clipToBelow) "Clip ✓" else "Clip below",
+                    color = if (active.clipToBelow) Color(0xFFFF9800) else Color.Gray,
                     fontSize = 9.sp
                 )
             }
             Spacer(Modifier.height(4.dp))
         }
 
-        Column(
-            modifier = Modifier
-                .weight(1f, fill = false)
-                .verticalScroll(rememberScrollState())
-        ) {
+        Column(modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             layers.asReversed().forEachIndexed { rev, _ ->
                 val index = layers.lastIndex - rev
                 val layer = layers[index]
                 val sel = index == activeIndex
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(4.dp))
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
                         .background(if (sel) Color(0xFF4A148C) else Color(0xFF2A2A2A))
-                        .border(
-                            1.dp,
-                            if (sel) Color(0xFFBB86FC) else Color.Transparent,
-                            RoundedCornerShape(4.dp)
-                        )
+                        .border(1.dp, if (sel) Color(0xFFBB86FC) else Color.Transparent, RoundedCornerShape(4.dp))
                         .clickable { onSelect(index) }
                         .padding(6.dp)
                 ) {
@@ -115,11 +107,7 @@ fun LayerPanel(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            layer.name.take(8),
-                            color = if (layer.visible) Color.White else Color.Gray,
-                            fontSize = 10.sp
-                        )
+                        Text(layer.name.take(8), color = if (layer.visible) Color.White else Color.Gray, fontSize = 10.sp)
                         Text(
                             if (layer.visible) "👁" else "—",
                             fontSize = 10.sp,
@@ -127,12 +115,9 @@ fun LayerPanel(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (layer.opacity < 0.99f) {
-                            Text("${(layer.opacity * 100).toInt()}%", color = Color.Gray, fontSize = 8.sp)
-                        }
-                        if (layer.blendMode != LayerBlendMode.NORMAL) {
-                            Text(layer.blendMode.name.take(3), color = Color(0xFF03DAC6), fontSize = 8.sp)
-                        }
+                        if (layer.opacity < 0.99f) Text("${(layer.opacity * 100).toInt()}%", color = Color.Gray, fontSize = 8.sp)
+                        if (layer.blendMode != LayerBlendMode.NORMAL) Text(layer.blendMode.name.take(3), color = Color(0xFF03DAC6), fontSize = 8.sp)
+                        if (layer.clipToBelow) Text("✂", color = Color(0xFFFF9800), fontSize = 8.sp)
                     }
                 }
                 Spacer(Modifier.height(3.dp))
@@ -144,11 +129,8 @@ fun LayerPanel(
 @Composable
 private fun SmallBtn(text: String, onClick: () -> Unit) {
     Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(3.dp))
-            .background(Color(0xFF333333))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+        modifier = Modifier.clip(RoundedCornerShape(3.dp)).background(Color(0xFF333333))
+            .clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 4.dp)
     ) {
         Text(text, color = Color.White, fontSize = 12.sp)
     }
