@@ -22,7 +22,7 @@ class CanvasEngine(
     private val _strokesByLayer = MutableStateFlow<Map<String, List<Stroke>>>(emptyMap())
     val strokesByLayer: StateFlow<Map<String, List<Stroke>>> = _strokesByLayer.asStateFlow()
 
-    private val _currentStroke = MutableStateFlow<List<StrokePoint>>(emptyMap())
+    private val _currentStroke = MutableStateFlow<List<StrokePoint>>(emptyList())
     val currentStroke: StateFlow<List<StrokePoint>> = _currentStroke.asStateFlow()
 
     private val _currentBrushId = MutableStateFlow("technical_pen")
@@ -37,22 +37,31 @@ class CanvasEngine(
     private val _toolMode = MutableStateFlow(ToolMode.DRAW)
     val toolMode: StateFlow<ToolMode> = _toolMode.asStateFlow()
 
-    private val _stabilization = MutableStateFlow(0.35f)
+    private val _stabilization = MutableStateFlow(0.35f) // 0f = none, 1f = max
     val stabilization: StateFlow<Float> = _stabilization.asStateFlow()
 
+    // Undo / Redo
     private val undoStack = mutableListOf<Map<String, List<Stroke>>>()
     private val redoStack = mutableListOf<Map<String, List<Stroke>>>()
 
-    fun setActiveLayer(id: String) {
-        if (_layers.value.any { it.id == id }) _activeLayerId.value = id
-    }
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
+
+    private val _canRedo = MutableStateFlow(false)
+    val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
 
     fun setToolMode(mode: ToolMode) {
         _toolMode.value = mode
     }
 
-    fun setBrush(id: String) {
-        _currentBrushId.value = id
+    fun setActiveLayer(layerId: String) {
+        if (_layers.value.any { it.id == layerId }) {
+            _activeLayerId.value = layerId
+        }
+    }
+
+    fun setBrush(brushId: String) {
+        _currentBrushId.value = brushId
         _toolMode.value = ToolMode.DRAW
     }
 
@@ -62,106 +71,182 @@ class CanvasEngine(
     }
 
     fun setSize(size: Float) {
-        _currentSize.value = size.coerceIn(0.5f, 256f)
+        _currentSize.value = size.coerceIn(1f, 200f)
     }
 
-    fun setStabilization(v: Float) {
-        _stabilization.value = v.coerceIn(0f, 1f)
+    fun setStabilization(value: Float) {
+        _stabilization.value = value.coerceIn(0f, 1f)
     }
 
-    fun beginStroke(point: StrokePoint) {
-        pushUndo()
+    fun startStroke(point: StrokePoint) {
         _currentStroke.value = listOf(point)
     }
 
-    fun appendStroke(point: StrokePoint) {
-        val cur = _currentStroke.value
-        if (cur.isEmpty()) return
-        val last = cur.last()
-        val dx = point.x - last.x
-        val dy = point.y - last.y
-        val dist = sqrt(dx * dx + dy * dy)
-        if (dist < 0.5f) return
-        val s = _stabilization.value
-        val smoothed = if (s <= 0f) point else point.copy(
-            x = last.x + (point.x - last.x) * (1f - s * 0.85f),
-            y = last.y + (point.y - last.y) * (1f - s * 0.85f)
-        )
-        _currentStroke.value = cur + smoothed
+    fun addPointToStroke(point: StrokePoint) {
+        _currentStroke.update { current ->
+            if (current.isEmpty()) {
+                listOf(point)
+            } else {
+                val last = current.last()
+                val dx = point.x - last.x
+                val dy = point.y - last.y
+                val dist = sqrt(dx * dx + dy * dy)
+                if (dist > 1.2f) current + point else current
+            }
+        }
     }
 
-    fun endStroke() {
-        val pts = _currentStroke.value
-        if (pts.size < 2) {
+    fun endStroke(): Stroke? {
+        val rawPoints = _currentStroke.value
+        if (rawPoints.size < 2) {
             _currentStroke.value = emptyList()
-            return
+            return null
         }
-        val layerId = _activeLayerId.value
+
+        val smoothed = smoothStroke(rawPoints, _stabilization.value)
+
         val isEraser = _toolMode.value == ToolMode.ERASE
+
         val stroke = Stroke(
-            points = pts,
+            points = smoothed,
+            brushId = if (isEraser) "eraser" else _currentBrushId.value,
             color = if (isEraser) 0x00000000 else _currentColor.value,
             size = _currentSize.value,
-            brushId = if (isEraser) "eraser" else _currentBrushId.value,
-            isEraser = isEraser
+            opacity = 1f
         )
-        _strokesByLayer.update { map ->
-            val list = map[layerId].orEmpty() + stroke
-            map + (layerId to list)
+
+        val layerId = _activeLayerId.value
+
+        pushUndoState()
+
+        _strokesByLayer.update { current ->
+            val existing = current[layerId] ?: emptyList()
+            current + (layerId to (existing + stroke))
         }
+
         _currentStroke.value = emptyList()
+        redoStack.clear()
+        updateUndoRedoState()
+
+        return stroke
     }
 
-    fun cancelStroke() {
-        _currentStroke.value = emptyList()
-    }
+    private fun smoothStroke(points: List<StrokePoint>, amount: Float): List<StrokePoint> {
+        if (points.size < 3 || amount <= 0f) return points
 
-    fun clearActiveLayer() {
-        pushUndo()
-        val id = _activeLayerId.value
-        _strokesByLayer.update { it + (id to emptyList()) }
-    }
+        val result = mutableListOf<StrokePoint>()
+        result.add(points.first())
 
-    fun addLayer(name: String = "Layer ${_layers.value.size + 1}") {
-        val layer = Layer(name = name)
-        _layers.update { it + layer }
-        _activeLayerId.value = layer.id
-    }
+        val window = (2 + (amount * 4)).toInt().coerceIn(2, 6)
 
-    fun removeLayer(id: String) {
-        if (_layers.value.size <= 1) return
-        pushUndo()
-        _layers.update { it.filter { l -> l.id != id } }
-        _strokesByLayer.update { it - id }
-        if (_activeLayerId.value == id) {
-            _activeLayerId.value = _layers.value.first().id
+        for (i in 1 until points.lastIndex) {
+            var sumX = 0f
+            var sumY = 0f
+            var sumP = 0f
+            var count = 0
+
+            for (j in (i - window)..(i + window)) {
+                if (j in points.indices) {
+                    sumX += points[j].x
+                    sumY += points[j].y
+                    sumP += points[j].pressure
+                    count++
+                }
+            }
+
+            result.add(
+                StrokePoint(
+                    x = sumX / count,
+                    y = sumY / count,
+                    pressure = sumP / count,
+                    tiltX = points[i].tiltX,
+                    tiltY = points[i].tiltY,
+                    timestamp = points[i].timestamp
+                )
+            )
         }
+
+        result.add(points.last())
+        return result
+    }
+
+    private fun pushUndoState() {
+        undoStack.add(_strokesByLayer.value.toMap())
+        if (undoStack.size > 50) undoStack.removeAt(0)
     }
 
     fun undo() {
         if (undoStack.isEmpty()) return
-        redoStack.add(_strokesByLayer.value)
+        redoStack.add(_strokesByLayer.value.toMap())
         _strokesByLayer.value = undoStack.removeAt(undoStack.lastIndex)
+        updateUndoRedoState()
     }
 
     fun redo() {
         if (redoStack.isEmpty()) return
-        undoStack.add(_strokesByLayer.value)
+        undoStack.add(_strokesByLayer.value.toMap())
         _strokesByLayer.value = redoStack.removeAt(redoStack.lastIndex)
+        updateUndoRedoState()
     }
 
-    private fun pushUndo() {
-        undoStack.add(_strokesByLayer.value)
-        if (undoStack.size > 50) undoStack.removeAt(0)
+    private fun updateUndoRedoState() {
+        _canUndo.value = undoStack.isNotEmpty()
+        _canRedo.value = redoStack.isNotEmpty()
+    }
+
+    fun addLayer(name: String = "Layer ${_layers.value.size + 1}") {
+        val newLayer = Layer(name = name)
+        _layers.update { it + newLayer }
+        _activeLayerId.value = newLayer.id
+    }
+
+    fun removeLayer(layerId: String) {
+        if (_layers.value.size <= 1) return
+        pushUndoState()
+        _layers.update { it.filter { it.id != layerId } }
+        _strokesByLayer.update { it - layerId }
+        if (_activeLayerId.value == layerId) {
+            _activeLayerId.value = _layers.value.last().id
+        }
+        updateUndoRedoState()
+    }
+
+    fun toggleLayerVisibility(layerId: String) {
+        _layers.update { list ->
+            list.map { if (it.id == layerId) it.copy(isVisible = !it.isVisible) else it }
+        }
+    }
+
+    fun clearActiveLayer() {
+        pushUndoState()
+        val layerId = _activeLayerId.value
+        _strokesByLayer.update { it + (layerId to emptyList()) }
         redoStack.clear()
+        updateUndoRedoState()
     }
 
-    fun getSerializableState(): Map<String, Any> {
-        return mapOf(
-            "width" to width,
-            "height" to height,
-            "layers" to _layers.value,
-            "strokes" to _strokesByLayer.value
+    // === Serialization helpers for Save/Load ===
+
+    fun getSerializableState(): EngineState {
+        return EngineState(
+            layers = _layers.value,
+            activeLayerId = _activeLayerId.value,
+            strokesByLayer = _strokesByLayer.value
         )
     }
+
+    fun loadState(state: EngineState) {
+        pushUndoState()
+        _layers.value = state.layers
+        _activeLayerId.value = state.activeLayerId
+        _strokesByLayer.value = state.strokesByLayer
+        redoStack.clear()
+        updateUndoRedoState()
+    }
+
+    data class EngineState(
+        val layers: List<Layer>,
+        val activeLayerId: String,
+        val strokesByLayer: Map<String, List<Stroke>>
+    )
 }
