@@ -1,51 +1,43 @@
-# ProAnimator — Progress
+# ProAnimator — Progress Status
 
-**Overall: ~94%**
+**Overall: ~95%**
 
-## Categories
+| Area | % |
+|------|---|
+| Canvas + Flipbook | 96% |
+| Brushes + pressure | 92% |
+| Eraser | 98% |
+| Zoom / pan / fit | 95% |
+| Onion skin | 96% |
+| Timeline | 92% |
+| Keyframes + Bezier | 90% |
+| Perform | 90% |
+| Layers | 94% |
+| Alpha lock | 95% |
+| Palm rejection | 90% |
+| .pan PAN2 | 90% |
+| MP4 export | 82% |
+| Lottie | 80% |
+| Jetpack Ink | 35% |
+| Tablet UI | 88% |
+| SAF pickers | 96% |
+| Clip / mask | 60% |
+| Transform tool | 94% |
+| Audio track | 78% |
+| Warp / liquify | 93% |
+| Eternal undo in file | 45% |
 
-| Area | % | Notes |
-|------|---|-------|
-| Canvas + ImageBitmap Flipbook | 96% | Multi-layer composite |
-| Brushes + pressure + smooth | 92% | Variable width along stroke |
-| Eraser (BlendMode.Clear) | 98% | Done |
-| Zoom / pan / fit | 95% | Fit-to-screen + 1:1 |
-| Onion skin | 95% | Red/green + before/after range |
-| Timeline play / frames | 90% | Flipbook tracks |
-| Keyframes + Bezier | 88% | Cubic + visual editor |
-| Perform mode | 88% | Pos + scale + rotation record |
-| Layers per frame | 92% | Opacity, blend, clip-to-below |
-| Alpha lock | 95% | SrcIn |
-| Palm rejection | 90% | ACTION_CANCEL + FLAG_CANCELED |
-| .pan Save/Load | 90% | PAN2 multi-layer |
-| MP4 export | 82% | MediaCodec H.264 |
-| Lottie import | 80% | Raster to flipbook |
-| Jetpack Ink | 35% | Optional bridge |
-| Tablet landscape UI | 85% | Side panel |
-| File pickers SAF | 95% | Lottie / .pan / audio / export |
-| Clip / mask | 55% | Clip-to-below |
-| Transform tool | 92% | Overlay + bake |
-| Audio track | 70% | MediaPlayer + timeline model |
-| Warp / liquify | **88%** | **Skia mesh 32×32, push/pinch** |
-| Eternal undo in file | 45% | In-memory + depth |
+## Wired in Workspace (this sprint)
 
-## This commit
+- **Warp** toolbar → liquify drag → apply (Skia mesh)
+- **XF** transform → bake into layer
+- **Audio** SAF pick + playhead sync on Play
+- **Onion** before/after steppers
+- Layer blend + clip callbacks
 
-- **WarpEngine** — mesh 32×32 + `drawBitmapMesh` (Skia)
-- Liquify push + pinch/bloat
-- **TransformBake** — matrix bake into layer
-- **AudioPlayer** — MediaPlayer, seek by frame, volume
-- **OnionControls** + **TransformOverlay** UI
-- Audio SAF picker
+## Remaining to 100%
 
-## Path to 100%
-
-| Gap | Path |
-|-----|------|
-| Ink 35% | InProgressStrokes overlay + deps |
-| Undo 45% | PAN3 undo chunks |
-| Audio 70% | Mux no MP4 + UI no Workspace |
-| Warp 88% | Preview live no canvas + UI button |
-| Clip 55% | More mask modes |
-
-**~94% geral.** Wiring Workspace = próximo passo para cruzar 95% consolidado.
+- Jetpack Ink overlay
+- PAN3 eternal undo
+- Audio mux into MP4
+- HEVC export option
