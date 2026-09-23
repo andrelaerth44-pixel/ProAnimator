@@ -1,9 +1,7 @@
-# Restore WorkspaceScreen (one command)
+# Restore WorkspaceScreen.kt
 
 ```bash
-python3 scripts/join_workspace_screen.py
+python3 scripts/decode_workspace_screen.py
 ```
 
-Joins `docs/ws_parts/part0..4.b64` into the full 703-line WorkspaceScreen.kt with Frame Viewer wired (Frames button + modal).
-
-Requires all five part*.b64 files under docs/ws_parts/.
+Needs `docs/ws_parts/z0.b64` + `z1.b64` + `z2.b64` (zlib+base64 of full 703-line file with Frame Viewer).
