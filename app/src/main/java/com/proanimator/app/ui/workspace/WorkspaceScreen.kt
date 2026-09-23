@@ -1,1 +1,3 @@
-READ_FROM_FILE_FAILED_USE_HOOK
+package com.proanimator.app.ui.workspace
+
+// PLACEHOLDER - will be replaced
