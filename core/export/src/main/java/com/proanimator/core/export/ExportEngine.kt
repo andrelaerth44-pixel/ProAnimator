@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.net.Uri
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import com.proanimator.domain.model.Stroke
@@ -33,10 +34,6 @@ data class ExportProgress(
     val message: String = ""
 )
 
-/**
- * ExportEngine — Phase 3
- * Supports PNG sequence and MP4 (via Mp4Encoder).
- */
 class ExportEngine(private val context: Context) {
 
     private val mp4Encoder = Mp4Encoder(context)
@@ -50,12 +47,8 @@ class ExportEngine(private val context: Context) {
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-
-        if (transparent) {
-            canvas.drawColor(Color.TRANSPARENT)
-        } else {
-            canvas.drawColor(backgroundColor)
-        }
+        if (transparent) canvas.drawColor(Color.TRANSPARENT)
+        else canvas.drawColor(backgroundColor)
 
         val paint = Paint().apply {
             isAntiAlias = true
@@ -69,7 +62,6 @@ class ExportEngine(private val context: Context) {
             paint.color = stroke.color.toInt()
             paint.alpha = (stroke.opacity * 255).toInt().coerceIn(0, 255)
             paint.strokeWidth = stroke.size
-
             val path = Path()
             path.moveTo(stroke.points[0].x, stroke.points[0].y)
             for (i in 1 until stroke.points.size) {
@@ -90,7 +82,6 @@ class ExportEngine(private val context: Context) {
                 "exports/png_sequence_${System.currentTimeMillis()}"
             )
             exportDir.mkdirs()
-
             bitmaps.forEachIndexed { index, imageBitmap ->
                 onProgress(ExportProgress(index + 1, bitmaps.size, "PNG frame ${index + 1}"))
                 val androidBmp = imageBitmap.asAndroidBitmap()
@@ -120,6 +111,36 @@ class ExportEngine(private val context: Context) {
             fps = fps,
             onProgress = { p ->
                 onProgress(ExportProgress(p.current, p.total, p.message))
+            }
+        )
+    }
+
+    /**
+     * Encode video then optionally mux AAC audio from [audioUri].
+     * Non-AAC sources fall back to video-only.
+     */
+    suspend fun exportMp4WithAudio(
+        bitmaps: List<ImageBitmap>,
+        width: Int = 1920,
+        height: Int = 1080,
+        fps: Float = 24f,
+        audioUri: Uri? = null,
+        onProgress: (ExportProgress) -> Unit = {}
+    ): Result<File> = withContext(Dispatchers.IO) {
+        val videoResult = exportMp4(bitmaps, width, height, fps, onProgress)
+        val videoFile = videoResult.getOrElse { return@withContext Result.failure(it) }
+        if (audioUri == null) return@withContext Result.success(videoFile)
+
+        onProgress(ExportProgress(bitmaps.size, bitmaps.size, "Muxing audio…"))
+        val out = File(
+            context.getExternalFilesDir(null),
+            "exports/proanimator_av_${System.currentTimeMillis()}.mp4"
+        )
+        AudioVideoMuxer.mux(context, videoFile, audioUri, out).fold(
+            onSuccess = { Result.success(it) },
+            onFailure = {
+                // Fallback: keep video-only
+                Result.success(videoFile)
             }
         )
     }
