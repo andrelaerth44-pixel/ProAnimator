@@ -3,6 +3,7 @@ package com.proanimator.core.timeline
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Color as AndroidColor
+import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import androidx.compose.ui.graphics.ImageBitmap
@@ -21,7 +22,7 @@ data class DrawLayer(
     var visible: Boolean = true,
     var opacity: Float = 1f,
     var blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
-    /** Clip to layer below (mask) */
+    /** Clip content to the alpha of the layer immediately below */
     var clipToBelow: Boolean = false
 )
 
@@ -71,8 +72,7 @@ class LayerStack(
 
     fun toggleVisibility(index: Int) {
         if (index in layers.indices) {
-            val L = layers[index]
-            layers[index] = L.copy(visible = !L.visible)
+            layers[index] = layers[index].copy(visible = !layers[index].visible)
         }
     }
 
@@ -96,8 +96,7 @@ class LayerStack(
 
     fun toggleClipToBelow(index: Int) {
         if (index in layers.indices) {
-            val L = layers[index]
-            layers[index] = L.copy(clipToBelow = !L.clipToBelow)
+            layers[index] = layers[index].copy(clipToBelow = !layers[index].clipToBelow)
         }
     }
 
@@ -117,6 +116,11 @@ class LayerStack(
         )
     }
 
+    /**
+     * Composite bottom → top.
+     * Clip-to-below: layer N is masked by alpha of the **running composite of layers below**
+     * (Procreate-style clipping mask).
+     */
     fun composite(): ImageBitmap {
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val c = AndroidCanvas(out)
@@ -124,30 +128,40 @@ class LayerStack(
 
         layers.forEachIndexed { index, layer ->
             if (!layer.visible) return@forEachIndexed
-            val paint = android.graphics.Paint().apply {
-                alpha = (layer.opacity.coerceIn(0f, 1f) * 255).toInt()
-                xfermode = porterDuff(layer.blendMode)
-            }
+            val layerBmp = layer.bitmap.asAndroidBitmap()
+            val alpha = (layer.opacity.coerceIn(0f, 1f) * 255).toInt()
 
             if (layer.clipToBelow && index > 0) {
-                // DST_IN style clip: draw layer then keep only intersection with below
-                val layerBmp = layer.bitmap.asAndroidBitmap()
+                // 1) Snapshot current composite as alpha mask
+                val mask = out.copy(Bitmap.Config.ARGB_8888, true)
+                // 2) Draw layer into temp, then DST_IN with mask → only where below had alpha
                 val tmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 val tc = AndroidCanvas(tmp)
-                // rebuild below composite roughly: use current `out` as mask base
-                tc.drawBitmap(out, 0f, 0f, null)
-                val clipPaint = android.graphics.Paint().apply {
-                    xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-                    alpha = paint.alpha
+                val lp = Paint().apply {
+                    this.alpha = alpha
+                    isFilterBitmap = true
                 }
-                tc.drawBitmap(layerBmp, 0f, 0f, clipPaint)
-                val merge = android.graphics.Paint().apply {
+                tc.drawBitmap(layerBmp, 0f, 0f, lp)
+                val clipPaint = Paint().apply {
+                    xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+                    isFilterBitmap = true
+                }
+                tc.drawBitmap(mask, 0f, 0f, clipPaint)
+                mask.recycle()
+                // 3) Blend tmp onto out with layer blend mode
+                val merge = Paint().apply {
                     xfermode = porterDuff(layer.blendMode)
+                    isFilterBitmap = true
                 }
                 c.drawBitmap(tmp, 0f, 0f, merge)
                 tmp.recycle()
             } else {
-                c.drawBitmap(layer.bitmap.asAndroidBitmap(), 0f, 0f, paint)
+                val paint = Paint().apply {
+                    this.alpha = alpha
+                    xfermode = porterDuff(layer.blendMode)
+                    isFilterBitmap = true
+                }
+                c.drawBitmap(layerBmp, 0f, 0f, paint)
             }
         }
         return out.asImageBitmap()

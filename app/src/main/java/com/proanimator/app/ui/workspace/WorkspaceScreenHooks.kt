@@ -1,6 +1,7 @@
 package com.proanimator.app.ui.workspace
 
 import android.net.Uri
+import androidx.compose.ui.geometry.Offset
 import com.proanimator.core.brushes.BrushLibrary
 import com.proanimator.core.engine.CanvasViewport
 import com.proanimator.core.export.ProjectSerializer
@@ -8,7 +9,6 @@ import com.proanimator.core.timeline.FlipbookBitmapEngine
 import com.proanimator.core.timeline.PerformEngine
 import com.proanimator.core.timeline.TimelineEngine
 import com.proanimator.core.timeline.TimelineMode
-import androidx.compose.ui.geometry.Offset
 
 object WorkspaceScreenHooks {
 
@@ -29,8 +29,10 @@ object WorkspaceScreenHooks {
         }
         applyProject(data, flipbook, perform, timeline)
         val vp = fitIfPossible(viewport, viewW, viewH)
+        val undoN = data.meta.optJSONObject("undo")?.optInt("depth", 0) ?: 0
         val msg = "Loaded ${data.frames.size}f / ${perform.keyframeCount()} KF" +
             if (data.layerStacks.isNotEmpty()) " (layers)" else "" +
+            if (undoN > 0) " · undo×$undoN" else "" +
             if (vp != null) " · fit" else ""
         return msg to vp
     }
@@ -81,6 +83,8 @@ object WorkspaceScreenHooks {
             timeline.setMode(TimelineMode.valueOf(extras.timelineMode))
         } catch (_: Exception) {
         }
+        // Eternal undo restore
+        flipbook.restoreUndoArchive(extras.undo)
         perform.evaluate(data.currentFrameIndex.toFloat())
     }
 
@@ -93,9 +97,10 @@ object WorkspaceScreenHooks {
         onion: Boolean,
         mode: String
     ): String {
-        val meta = ProjectSerializer.buildMeta(brushId, onion, mode, perform)
+        val undo = flipbook.exportUndoArchive()
+        val meta = ProjectSerializer.buildMeta(brushId, onion, mode, perform, undo)
         return serializer.saveFromFlipbook(flipbook, fps, meta).fold(
-            onSuccess = { "Saved ${it.name} (PAN2)" },
+            onSuccess = { "Saved ${it.name} (PAN · undo×${undo.optInt("depth")})" },
             onFailure = { "Save fail: ${it.message?.take(32)}" }
         )
     }
@@ -110,9 +115,10 @@ object WorkspaceScreenHooks {
         onion: Boolean,
         mode: String
     ): String {
-        val meta = ProjectSerializer.buildMeta(brushId, onion, mode, perform)
+        val undo = flipbook.exportUndoArchive()
+        val meta = ProjectSerializer.buildMeta(brushId, onion, mode, perform, undo)
         return serializer.saveToUri(uri, flipbook, fps, meta).fold(
-            onSuccess = { "Exported .pan" },
+            onSuccess = { "Exported .pan · undo×${undo.optInt("depth")}" },
             onFailure = { "Export fail: ${it.message?.take(32)}" }
         )
     }

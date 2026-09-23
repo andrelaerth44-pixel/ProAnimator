@@ -13,11 +13,13 @@ import com.proanimator.core.brushes.BrushPreset
 import com.proanimator.core.engine.ToolMode
 import com.proanimator.core.engine.TransformBake
 import com.proanimator.core.engine.WarpEngine
+import com.proanimator.core.export.UndoArchive
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import org.json.JSONObject
 import java.util.UUID
 
 class FlipbookBitmapEngine(
@@ -114,7 +116,6 @@ class FlipbookBitmapEngine(
 
     fun toggleWarpMode() = setWarpMode(!_warpMode.value)
 
-    /** Live liquify stroke while warp mode on */
     fun warpPush(cx: Float, cy: Float, dx: Float, dy: Float, radius: Float = 100f) {
         if (!_warpMode.value) return
         warpEngine.push(cx, cy, dx, dy, radius, strength = 0.9f)
@@ -125,7 +126,6 @@ class FlipbookBitmapEngine(
         warpEngine.pinchBloat(cx, cy, amount)
     }
 
-    /** Bake mesh into active layer bitmap */
     fun applyWarp() {
         if (!_warpMode.value) return
         val frame = currentFrame ?: return
@@ -146,7 +146,6 @@ class FlipbookBitmapEngine(
         _warpMode.value = false
     }
 
-    /** Bake transform into active layer */
     fun bakeTransform(tx: Float, ty: Float, scale: Float, rotation: Float) {
         val frame = currentFrame ?: return
         val active = frame.layers.activeLayer()
@@ -294,6 +293,23 @@ class FlipbookBitmapEngine(
 
     fun undoDepth(): Int = undoStack.size
 
+    /** Export last N undo snapshots for PAN meta (eternal undo). */
+    fun exportUndoArchive(maxDepth: Int = UndoArchive.DEFAULT_DEPTH): JSONObject {
+        return UndoArchive.encode(undoStack.toList(), maxDepth)
+    }
+
+    /** Restore undo stack from PAN meta after load. */
+    fun restoreUndoArchive(undoJson: JSONObject?) {
+        undoStack.clear()
+        redoStack.clear()
+        val snaps = UndoArchive.decode(undoJson)
+        for (s in snaps) {
+            val bmp = UndoArchive.decodeBitmap(s.pngBase64) ?: continue
+            undoStack.add(s.frameIndex to bmp)
+        }
+        updateUndoRedo()
+    }
+
     fun clearCurrentFrame() {
         val frame = currentFrame ?: return
         val active = frame.layers.activeLayer()
@@ -328,7 +344,6 @@ class FlipbookBitmapEngine(
 
     fun getAllBitmaps(): List<ImageBitmap> = _frames.value.map { it.bitmap }
 
-    /** Preview warped active layer without baking (for UI) */
     fun previewWarp(): ImageBitmap? {
         if (!_warpMode.value) return null
         val active = currentFrame?.layers?.activeLayer() ?: return null
