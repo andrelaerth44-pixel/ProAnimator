@@ -9,10 +9,6 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import java.util.UUID
 
-/**
- * Multi-layer stack per Flipbook frame.
- * Drawing targets [activeLayerIndex]; composite for display/export/onion.
- */
 data class DrawLayer(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -31,18 +27,26 @@ class LayerStack(
         private set
 
     init {
-        repeat(initialLayers.coerceAtLeast(1)) { i ->
+        repeat(initialLayers.coerceAtLeast(0)) { i ->
             layers.add(DrawLayer(name = "Layer ${i + 1}", bitmap = emptyBitmap()))
         }
+        if (layers.isNotEmpty()) activeLayerIndex = 0
     }
 
     fun layerCount(): Int = layers.size
 
     fun layers(): List<DrawLayer> = layers.toList()
 
-    fun activeLayer(): DrawLayer = layers[activeLayerIndex.coerceIn(0, layers.lastIndex)]
+    fun activeLayer(): DrawLayer {
+        if (layers.isEmpty()) {
+            layers.add(DrawLayer(name = "Layer 1", bitmap = emptyBitmap()))
+            activeLayerIndex = 0
+        }
+        return layers[activeLayerIndex.coerceIn(0, layers.lastIndex)]
+    }
 
     fun setActive(index: Int) {
+        if (layers.isEmpty()) return
         activeLayerIndex = index.coerceIn(0, layers.lastIndex)
     }
 
@@ -60,11 +64,28 @@ class LayerStack(
 
     fun toggleVisibility(index: Int) {
         if (index in layers.indices) {
-            layers[index] = layers[index].copy(visible = !layers[index].visible)
+            val L = layers[index]
+            layers[index] = L.copy(visible = !L.visible)
         }
     }
 
-    /** Flatten visible layers bottom→top for onion/export */
+    fun setLayerOpacity(index: Int, opacity: Float) {
+        if (index in layers.indices) {
+            val L = layers[index]
+            layers[index] = L.copy(opacity = opacity.coerceIn(0f, 1f))
+        }
+    }
+
+    fun setLayerMeta(index: Int, name: String, visible: Boolean, opacity: Float) {
+        if (index !in layers.indices) return
+        val L = layers[index]
+        layers[index] = L.copy(
+            name = name,
+            visible = visible,
+            opacity = opacity.coerceIn(0f, 1f)
+        )
+    }
+
     fun composite(): ImageBitmap {
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val c = AndroidCanvas(out)
@@ -80,7 +101,12 @@ class LayerStack(
     }
 
     fun replaceActiveBitmap(bmp: ImageBitmap) {
-        val i = activeLayerIndex
+        if (layers.isEmpty()) {
+            layers.add(DrawLayer(name = "Layer 1", bitmap = bmp))
+            activeLayerIndex = 0
+            return
+        }
+        val i = activeLayerIndex.coerceIn(0, layers.lastIndex)
         layers[i] = layers[i].copy(bitmap = bmp)
     }
 
@@ -88,7 +114,12 @@ class LayerStack(
         activeLayer().bitmap.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true)
 
     fun restoreActive(bmp: Bitmap) {
-        layers[activeLayerIndex] = activeLayer().copy(bitmap = bmp.asImageBitmap())
+        val i = activeLayerIndex.coerceIn(0, layers.lastIndex.coerceAtLeast(0))
+        if (layers.isEmpty()) {
+            layers.add(DrawLayer(name = "Layer 1", bitmap = bmp.asImageBitmap()))
+            return
+        }
+        layers[i] = layers[i].copy(bitmap = bmp.asImageBitmap())
     }
 
     fun duplicateFrom(other: LayerStack) {
@@ -98,7 +129,15 @@ class LayerStack(
                 .copy(Bitmap.Config.ARGB_8888, true).asImageBitmap()
             layers.add(src.copy(id = UUID.randomUUID().toString(), bitmap = copy))
         }
+        if (layers.isEmpty()) {
+            layers.add(DrawLayer(name = "Layer 1", bitmap = emptyBitmap()))
+        }
         activeLayerIndex = other.activeLayerIndex.coerceIn(0, layers.lastIndex)
+    }
+
+    /** Restore full stack from PAN2 load */
+    fun replaceAll(from: LayerStack) {
+        duplicateFrom(from)
     }
 
     private fun emptyBitmap(): ImageBitmap =

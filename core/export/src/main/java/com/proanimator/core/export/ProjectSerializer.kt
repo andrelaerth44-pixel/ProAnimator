@@ -3,12 +3,15 @@ package com.proanimator.core.export
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.proanimator.core.timeline.AnimProperty
 import com.proanimator.core.timeline.EasingType
+import com.proanimator.core.timeline.FlipbookBitmapEngine
 import com.proanimator.core.timeline.Keyframe
+import com.proanimator.core.timeline.LayerStack
 import com.proanimator.core.timeline.PerformEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -20,38 +23,23 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.OutputStream
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 /**
- * ProjectSerializer — full .pan Save/Load
+ * .pan format
  *
- * Binary + GZIP:
- *   MAGIC "PAN1"
- *   version, width, height, fps, currentFrame, frameCount
- *   frames as PNG
- *   meta JSON (UTF-8) including:
- *     brush, onion, timelineMode
- *     keyframe tracks (all AnimProperty)
- *
- * Meta schema (version 2 content inside PAN1 container):
- * {
- *   "schema": 2,
- *   "brushId": "pen",
- *   "onionEnabled": true,
- *   "timelineMode": "COMPOSE",
- *   "tracks": {
- *     "POS_X": [ { "frame": 0, "value": 0, "easing": "BEZIER", "bx1": 0.42, ... } ],
- *     ...
- *   }
- * }
+ * PAN1 (legacy): composite PNG per frame + meta
+ * PAN2: per-layer PNG stacks + meta schema 3
  */
 class ProjectSerializer(private val context: Context) {
 
     companion object {
-        private const val MAGIC = "PAN1"
-        private const val VERSION = 1
-        private const val META_SCHEMA = 2
+        private const val MAGIC_V1 = "PAN1"
+        private const val MAGIC_V2 = "PAN2"
+        private const val VERSION = 2
+        private const val META_SCHEMA = 3
         private const val EXT = ".pan"
 
         fun buildMeta(
@@ -120,6 +108,12 @@ class ProjectSerializer(private val context: Context) {
                 timelineMode = meta.optString("timelineMode", "COMPOSE")
             )
         }
+
+        private fun pngBytes(bmp: ImageBitmap): ByteArray {
+            val baos = ByteArrayOutputStream()
+            bmp.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, baos)
+            return baos.toByteArray()
+        }
     }
 
     data class MetaExtras(
@@ -134,9 +128,83 @@ class ProjectSerializer(private val context: Context) {
         val fps: Float,
         val currentFrameIndex: Int,
         val frames: List<ImageBitmap>,
-        val meta: JSONObject = JSONObject()
+        val meta: JSONObject = JSONObject(),
+        /** PAN2: parallel layer stacks; empty = composite-only */
+        val layerStacks: List<LayerStack> = emptyList()
     )
 
+    suspend fun saveFromFlipbook(
+        flipbook: FlipbookBitmapEngine,
+        fps: Float,
+        meta: JSONObject,
+        fileName: String = "project_${System.currentTimeMillis()}"
+    ): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            val dir = File(context.filesDir, "projects")
+            dir.mkdirs()
+            val file = File(dir, if (fileName.endsWith(EXT)) fileName else "$fileName$EXT")
+            FileOutputStream(file).use { fos -> writePan2(fos, flipbook, fps, meta) }
+            Result.success(file)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveToUri(
+        uri: Uri,
+        flipbook: FlipbookBitmapEngine,
+        fps: Float,
+        meta: JSONObject
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { os ->
+                writePan2(os, flipbook, fps, meta)
+            } ?: return@withContext Result.failure(IllegalStateException("No output stream"))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun writePan2(
+        os: OutputStream,
+        flipbook: FlipbookBitmapEngine,
+        fps: Float,
+        meta: JSONObject
+    ) {
+        GZIPOutputStream(os).use { gzos ->
+            DataOutputStream(gzos).use { out ->
+                out.writeBytes(MAGIC_V2)
+                out.writeInt(VERSION)
+                out.writeInt(flipbook.width)
+                out.writeInt(flipbook.height)
+                out.writeFloat(fps)
+                out.writeInt(flipbook.currentIndex.value)
+                val frameList = flipbook.frames.value
+                out.writeInt(frameList.size)
+
+                frameList.forEach { frame ->
+                    val layers = frame.layers.layers()
+                    out.writeInt(layers.size)
+                    out.writeInt(frame.layers.activeLayerIndex)
+                    layers.forEach { layer ->
+                        out.writeUTF(layer.name)
+                        out.writeBoolean(layer.visible)
+                        out.writeFloat(layer.opacity)
+                        val png = pngBytes(layer.bitmap)
+                        out.writeInt(png.size)
+                        out.write(png)
+                    }
+                }
+
+                val metaBytes = meta.toString().toByteArray(Charsets.UTF_8)
+                out.writeInt(metaBytes.size)
+                out.write(metaBytes)
+            }
+        }
+    }
+
+    /** Legacy composite-only save (compat) */
     suspend fun save(
         data: ProjectData,
         fileName: String = "project_${System.currentTimeMillis()}"
@@ -145,12 +213,11 @@ class ProjectSerializer(private val context: Context) {
             val dir = File(context.filesDir, "projects")
             dir.mkdirs()
             val file = File(dir, if (fileName.endsWith(EXT)) fileName else "$fileName$EXT")
-
             FileOutputStream(file).use { fos ->
                 GZIPOutputStream(fos).use { gzos ->
                     DataOutputStream(gzos).use { out ->
-                        out.writeBytes(MAGIC)
-                        out.writeInt(VERSION)
+                        out.writeBytes(MAGIC_V1)
+                        out.writeInt(1)
                         out.writeInt(data.width)
                         out.writeInt(data.height)
                         out.writeFloat(data.fps)
@@ -161,16 +228,11 @@ class ProjectSerializer(private val context: Context) {
                             )
                         )
                         out.writeInt(data.frames.size)
-
                         data.frames.forEach { imageBitmap ->
-                            val bmp = imageBitmap.asAndroidBitmap()
-                            val baos = ByteArrayOutputStream()
-                            bmp.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                            val png = baos.toByteArray()
+                            val png = pngBytes(imageBitmap)
                             out.writeInt(png.size)
                             out.write(png)
                         }
-
                         val metaBytes = data.meta.toString().toByteArray(Charsets.UTF_8)
                         out.writeInt(metaBytes.size)
                         out.write(metaBytes)
@@ -185,67 +247,158 @@ class ProjectSerializer(private val context: Context) {
 
     suspend fun load(file: File): Result<ProjectData> = withContext(Dispatchers.IO) {
         try {
-            FileInputStream(file).use { fis ->
-                GZIPInputStream(fis).use { gzis ->
-                    DataInputStream(gzis).use { input ->
-                        val magicBytes = ByteArray(4)
-                        input.readFully(magicBytes)
-                        val magic = String(magicBytes, Charsets.US_ASCII)
-                        if (magic != MAGIC) {
-                            return@withContext Result.failure(
-                                IllegalArgumentException("Not a valid .pan file (magic=$magic)")
-                            )
-                        }
-
-                        val version = input.readInt()
-                        if (version > VERSION) {
-                            return@withContext Result.failure(
-                                IllegalArgumentException("Unsupported .pan version $version")
-                            )
-                        }
-
-                        val width = input.readInt()
-                        val height = input.readInt()
-                        val fps = input.readFloat()
-                        val currentFrameIndex = input.readInt()
-                        val frameCount = input.readInt()
-
-                        val frames = mutableListOf<ImageBitmap>()
-                        repeat(frameCount) {
-                            val pngLen = input.readInt()
-                            val pngBytes = ByteArray(pngLen)
-                            input.readFully(pngBytes)
-                            val bmp = BitmapFactory.decodeByteArray(pngBytes, 0, pngLen)
-                                ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                            frames.add(bmp.asImageBitmap())
-                        }
-
-                        val metaLen = input.readInt()
-                        val meta = if (metaLen > 0) {
-                            val metaBytes = ByteArray(metaLen)
-                            input.readFully(metaBytes)
-                            JSONObject(String(metaBytes, Charsets.UTF_8))
-                        } else JSONObject()
-
-                        Result.success(
-                            ProjectData(
-                                width = width,
-                                height = height,
-                                fps = fps,
-                                currentFrameIndex = currentFrameIndex.coerceIn(
-                                    0,
-                                    (frames.size - 1).coerceAtLeast(0)
-                                ),
-                                frames = frames,
-                                meta = meta
-                            )
-                        )
-                    }
-                }
-            }
+            FileInputStream(file).use { fis -> loadStream(fis) }
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun loadFromUri(uri: Uri): Result<ProjectData> = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.openInputStream(uri)?.use { loadStream(it) }
+                ?: Result.failure(IllegalStateException("Cannot open uri"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun loadStream(inputStream: java.io.InputStream): Result<ProjectData> {
+        GZIPInputStream(inputStream).use { gzis ->
+            DataInputStream(gzis).use { input ->
+                val magicBytes = ByteArray(4)
+                input.readFully(magicBytes)
+                val magic = String(magicBytes, Charsets.US_ASCII)
+
+                return when (magic) {
+                    MAGIC_V2 -> loadPan2(input)
+                    MAGIC_V1 -> loadPan1(input)
+                    else -> Result.failure(
+                        IllegalArgumentException("Not a valid .pan (magic=$magic)")
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadPan1(input: DataInputStream): Result<ProjectData> {
+        val version = input.readInt()
+        if (version > 1) {
+            return Result.failure(IllegalArgumentException("Unsupported PAN1 version $version"))
+        }
+        val width = input.readInt()
+        val height = input.readInt()
+        val fps = input.readFloat()
+        val currentFrameIndex = input.readInt()
+        val frameCount = input.readInt()
+        val frames = mutableListOf<ImageBitmap>()
+        repeat(frameCount) {
+            val pngLen = input.readInt()
+            val pngBytes = ByteArray(pngLen)
+            input.readFully(pngBytes)
+            val bmp = BitmapFactory.decodeByteArray(pngBytes, 0, pngLen)
+                ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            frames.add(bmp.asImageBitmap())
+        }
+        val metaLen = input.readInt()
+        val meta = if (metaLen > 0) {
+            val metaBytes = ByteArray(metaLen)
+            input.readFully(metaBytes)
+            JSONObject(String(metaBytes, Charsets.UTF_8))
+        } else JSONObject()
+        return Result.success(
+            ProjectData(
+                width, height, fps,
+                currentFrameIndex.coerceIn(0, (frames.size - 1).coerceAtLeast(0)),
+                frames, meta
+            )
+        )
+    }
+
+    private fun loadPan2(input: DataInputStream): Result<ProjectData> {
+        val version = input.readInt()
+        if (version > VERSION) {
+            return Result.failure(IllegalArgumentException("Unsupported PAN2 version $version"))
+        }
+        val width = input.readInt()
+        val height = input.readInt()
+        val fps = input.readFloat()
+        val currentFrameIndex = input.readInt()
+        val frameCount = input.readInt()
+
+        val composites = mutableListOf<ImageBitmap>()
+        val stacks = mutableListOf<LayerStack>()
+
+        repeat(frameCount) {
+            val layerCount = input.readInt()
+            val activeIdx = input.readInt()
+            val stack = LayerStack(width, height, initialLayers = 0)
+            // LayerStack with 0 layers — rebuild manually via reflection-free API
+            // Use addLayer + replace
+            val rebuilt = LayerStack(width, height, initialLayers = 1)
+            // clear default and rebuild
+            if (layerCount == 0) {
+                stacks.add(rebuilt)
+                composites.add(rebuilt.composite())
+                return@repeat
+            }
+            // First layer overwrites default
+            for (li in 0 until layerCount) {
+                val name = input.readUTF()
+                val visible = input.readBoolean()
+                val opacity = input.readFloat()
+                val pngLen = input.readInt()
+                val pngBytes = ByteArray(pngLen)
+                input.readFully(pngBytes)
+                val bmp = BitmapFactory.decodeByteArray(pngBytes, 0, pngLen)
+                    ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                if (li == 0) {
+                    rebuilt.replaceActiveBitmap(bmp.asImageBitmap())
+                    // patch name/visible/opacity via toggle + set — use layers list mutation helpers
+                    patchLayerMeta(rebuilt, 0, name, visible, opacity)
+                } else {
+                    rebuilt.addLayer(name)
+                    rebuilt.replaceActiveBitmap(bmp.asImageBitmap())
+                    patchLayerMeta(rebuilt, li, name, visible, opacity)
+                }
+            }
+            rebuilt.setActive(activeIdx.coerceIn(0, layerCount - 1))
+            stacks.add(rebuilt)
+            composites.add(rebuilt.composite())
+        }
+
+        val metaLen = input.readInt()
+        val meta = if (metaLen > 0) {
+            val metaBytes = ByteArray(metaLen)
+            input.readFully(metaBytes)
+            JSONObject(String(metaBytes, Charsets.UTF_8))
+        } else JSONObject()
+
+        return Result.success(
+            ProjectData(
+                width = width,
+                height = height,
+                fps = fps,
+                currentFrameIndex = currentFrameIndex.coerceIn(
+                    0,
+                    (composites.size - 1).coerceAtLeast(0)
+                ),
+                frames = composites,
+                meta = meta,
+                layerStacks = stacks
+            )
+        )
+    }
+
+    private fun patchLayerMeta(
+        stack: LayerStack,
+        index: Int,
+        name: String,
+        visible: Boolean,
+        opacity: Float
+    ) {
+        stack.setActive(index)
+        // LayerStack exposes layers() as copy — need mutators
+        stack.setLayerMeta(index, name, visible, opacity)
     }
 
     fun listProjects(): List<File> {

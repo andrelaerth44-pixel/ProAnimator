@@ -6,7 +6,6 @@ import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.nativeCanvas
 import com.proanimator.core.brushes.BrushEngine
 import com.proanimator.core.brushes.BrushLibrary
@@ -19,10 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.UUID
 
-/**
- * Flipbook with **multi-layer** frames.
- * Stroke draws on active layer; display uses composite.
- */
 class FlipbookBitmapEngine(
     val width: Int = 1920,
     val height: Int = 1080
@@ -164,6 +159,11 @@ class FlipbookBitmapEngine(
         bumpLayers()
     }
 
+    fun setLayerOpacity(index: Int, opacity: Float) {
+        currentFrame?.layers?.setLayerOpacity(index, opacity)
+        bumpLayers()
+    }
+
     fun loadFrames(bitmaps: List<ImageBitmap>, startIndex: Int = 0) {
         if (bitmaps.isEmpty()) return
         undoStack.clear()
@@ -171,11 +171,26 @@ class FlipbookBitmapEngine(
         updateUndoRedo()
         _frames.value = bitmaps.mapIndexed { i, bmp ->
             val stack = LayerStack(width, height)
-            // Put imported content on layer 0
             stack.replaceActiveBitmap(bmp)
             Frame(index = i, layers = stack)
         }
         _currentIndex.value = startIndex.coerceIn(0, bitmaps.size - 1)
+        _currentPath.value = emptyList()
+        bumpLayers()
+    }
+
+    /** Restore full multi-layer stacks from PAN2 */
+    fun loadLayerStacks(stacks: List<LayerStack>, startIndex: Int = 0) {
+        if (stacks.isEmpty()) return
+        undoStack.clear()
+        redoStack.clear()
+        updateUndoRedo()
+        _frames.value = stacks.mapIndexed { i, src ->
+            val stack = LayerStack(width, height, initialLayers = 0)
+            stack.replaceAll(src)
+            Frame(index = i, layers = stack)
+        }
+        _currentIndex.value = startIndex.coerceIn(0, stacks.size - 1)
         _currentPath.value = emptyList()
         bumpLayers()
     }
@@ -203,21 +218,14 @@ class FlipbookBitmapEngine(
         val frame = currentFrame ?: return
         val active = frame.layers.activeLayer()
         pushUndo(frame.index, active.bitmap)
-
         brushEngine.drawStroke(active.bitmap, points)
-
-        _frames.update { list ->
-            list.map { if (it.id == frame.id) it else it }
-        }
         _currentPath.value = emptyList()
         redoStack.clear()
         updateUndoRedo()
         bumpLayers()
     }
 
-    fun cancelStroke() {
-        _currentPath.value = emptyList()
-    }
+    fun cancelStroke() { _currentPath.value = emptyList() }
 
     private fun pushUndo(frameIndex: Int, bitmap: ImageBitmap) {
         val copy = bitmap.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true)
