@@ -1,95 +1,75 @@
 # ProAnimator
 
-**High-Performance 2D Animation & Motion Graphics Engine for Android**
+**2D animation + painting for Android** — inspired by Procreate Dreams workflows.
 
-ProAnimator is an ambitious open-source project aiming to deliver a professional-grade 2D animation experience on Android, inspired by the architecture and workflows of Procreate Dreams.
-
-> Goal: Create the most powerful native 2D animation tool for Android tablets, foldables and high-end devices.
+Repo: https://github.com/andrelaerth44-pixel/ProAnimator
 
 ---
 
-## Vision
+## What works today (v0.5.0-alpha)
 
-- Real-time painting + compositing engine
-- Multi-track timeline with **Compose / Keyframe / Perform** modes
-- High-resolution canvases (up to 8K+)
-- Advanced brush system with pressure, tilt, velocity and stabilization
-- Onion skinning, Alpha Lock, Warp/Distort, non-destructive effects
-- Custom file format `.pan` with streaming + eternal undo history
-- Professional export pipeline (MP4 H.264/HEVC, transparent video, PNG sequences, GIF)
-- Designed for S-Pen, stylus and high refresh rate displays
+| Area | Features |
+|------|----------|
+| **Canvas** | ImageBitmap per Flipbook frame, true eraser (`BlendMode.Clear`), checkerboard |
+| **Brushes** | Pen, Pencil, Marker, Soft, Ink, Eraser + pressure curves + EMA smooth |
+| **Stylus** | Real `PointerInputChange.pressure` |
+| **Zoom/Pan** | Pinch zoom (centroid), two-finger pan, **1:1** reset |
+| **Timeline** | Flipbook frames, onion skin (red/green), play |
+| **Keyframes** | POS_X/Y, SCALE, ROTATION, OPACITY + cubic **Bezier** editor |
+| **Perform** | REC drag → record position tracks |
+| **Export** | PNG sequence, **MP4** (MediaCodec H.264) |
+| **Project** | **`.pan`** Save/Load (frames + keyframes + brush + onion) |
+| **Lottie** | Import JSON → raster frames into Flipbook |
+| **Jetpack Ink** | Optional bridge (reflection); enable via deps + flag |
 
 ---
 
-## Architecture Overview
+## Modules
 
 ```
-ProAnimator/
-├── app/                          # Main application (Jetpack Compose UI)
-├── core/
-│   ├── engine/                   # Painting + Compositing engine
-│   ├── timeline/                 # Multi-track timeline + keyframes + Perform
-│   ├── brushes/                  # Data-driven brush engine
-│   ├── fileformat/               # .pan format (streaming + undo history)
-│   └── export/                   # Export pipeline
-├── rendering/                    # Skia (primary) + Vulkan path
-├── domain/                       # Pure domain models
-├── data/                         # Repositories & persistence
-└── docs/                         # Architecture & Roadmap
+app/
+core/engine      # viewport, pressure stroke, bitmap layers
+core/brushes     # BrushPreset, BrushEngine, smoother
+core/timeline    # Flipbook, keyframes, Perform, Bezier math
+core/export      # MP4, PNG, ProjectSerializer (.pan)
+core/lottie      # Lottie → ImageBitmap frames
+core/ink         # Optional Jetpack Ink gate
+domain/
 ```
 
-### Core Design Principles (from deep analysis of Procreate Dreams)
+---
 
-1. **Real-time first** — No RAM preview. Every change must be playable instantly.
-2. **Streaming resources** — Large projects open and scrub without loading everything into memory.
-3. **Gesture-native timeline** — Multi-touch + stylus as primary input.
-4. **Modular brush engine** — Brushes are data-driven and extensible.
-5. **Non-destructive by default** — Keyframes, effects and transforms stay editable.
-6. **Eternal undo** — Undo history lives inside the project file.
+## Build
+
+```bash
+git clone https://github.com/andrelaerth44-pixel/ProAnimator.git
+cd ProAnimator
+# Open in Android Studio (Ladybug+) or:
+./gradlew :app:assembleDebug
+```
+
+**Lottie test:** put a Bodymovin JSON in `app/src/main/assets/demo.json` → tap **Lottie**.
+
+**Optional Ink:** see `docs/JETPACK_INK.md`.
 
 ---
 
-## Current Status
+## Docs
 
-**Phase 0 — Foundation (this commit)**
-- Project structure defined
-- Architecture documentation
-- Core vision and principles
-- Ready for multi-module Gradle setup
-
----
-
-## Roadmap
-
-See [docs/ROADMAP.md](docs/ROADMAP.md)
-
-### Quick Summary
-- **Phase 1**: Canvas + Brush Engine foundation
-- **Phase 2**: Timeline core (Flipbook + Keyframes)
-- **Phase 3**: Perform mode + advanced animation
-- **Phase 4**: `.pan` format + high performance
-- **Phase 5**: Professional export + polish
+- `docs/ARCHITECTURE.md`
+- `docs/ROADMAP.md`
+- `docs/PAN_FORMAT.md`
+- `docs/PHASE3.md` … `docs/PHASE5.md`
+- `docs/JETPACK_INK.md`
 
 ---
 
-## Tech Stack
+## Stack
 
-- **Language**: Kotlin
-- **UI**: Jetpack Compose
-- **Rendering**: Skia (primary) + Vulkan experimental path
-- **Async**: Kotlin Coroutines + Flow
-- **DI**: Hilt
-- **Min SDK**: 26 | Target: 35+
+Kotlin · Jetpack Compose · MediaCodec · Lottie Android · (optional androidx.ink)
+
+Min SDK 26 · Target 35
 
 ---
 
-## How to Contribute
-
-1. Read `docs/ARCHITECTURE.md`
-2. Follow the roadmap
-3. Open PRs with clear descriptions
-
----
-
-**Built with deep engineering mindset.**  
-Inspired by the best. Built for Android.
+Built with deep engineering. Inspired by Procreate Dreams. Made for Android.
