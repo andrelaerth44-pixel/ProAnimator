@@ -2,7 +2,7 @@
 
 ## Research summary
 
-- **androidx.ink 1.0.0** stable (Dec 2025) / 1.1.0-alpha available
+- **androidx.ink 1.0.0** stable / 1.1.0-alpha
 - Modules: authoring-compose (`InProgressStrokes`), brush-compose (`StockBrushes`), geometry, rendering, storage
 - Best for low-latency stylus mesh strokes
 - ProAnimator keeps **ImageBitmap Flipbook** as source of truth for export/MP4/.pan
@@ -32,8 +32,17 @@ InkFeatureFlags.enabled = true
 
 ## Integration path
 
-1. Overlay `InProgressStrokes` on the canvas when `canUse`
-2. `onStrokesFinished` → rasterize stroke mesh to current Flipbook frame bitmap
+1. Overlay `InkComposeOverlay` / `InProgressStrokes` on the canvas when `canUse`
+2. `onStrokesFinished` → `InkRasterizer.rasterize` / `applyInkStrokeToFlipbook`
 3. Keep eraser / onion / export on bitmap path
 
-Until enabled, **BrushEngine + pressure** is the production path.
+## Code already in repo
+
+| File | Role |
+|------|------|
+| `InkBridge` / `InkFeatureFlags` | Optional detection |
+| `InkRasterizer` | Pressure segment raster onto ImageBitmap |
+| `InkComposeOverlay` | Host slot for InProgressStrokes |
+| `applyInkStrokeToFlipbook` | Finish → active layer |
+
+Until deps are present, **BrushEngine + pressure** is the production path.

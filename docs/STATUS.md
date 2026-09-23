@@ -1,6 +1,6 @@
 # ProAnimator — Progress Status
 
-**Overall: ~97%**
+**Overall: ~98%**
 
 | Area | % |
 |------|---|
@@ -15,27 +15,27 @@
 | Layers | 94% |
 | Alpha lock | 95% |
 | Palm rejection | 90% |
-| .pan PAN2/3 | 93% |
-| MP4 export | 90% |
+| .pan PAN2 meta schema 4 | 96% |
+| MP4 + audio mux | 90% |
 | Lottie | 80% |
-| Jetpack Ink | 55% |
+| Jetpack Ink | 65% |
 | Tablet UI | 88% |
 | SAF pickers | 96% |
 | Clip / mask | 60% |
 | Transform tool | 94% |
 | Audio track | 88% |
 | Warp / liquify | 93% |
-| Eternal undo in file | 72% |
+| Eternal undo in file | 85% |
 
-## This sprint → 97%
+## This sprint
 
-- **AudioVideoMuxer** — AAC audio remux into H.264 MP4
-- **UndoArchive** — last N layer PNG snapshots for PAN eternal undo
-- **InkRasterizer** — high-quality stroke raster + Ink finish hook
+- Meta schema **4** + `undo` field in buildMeta / applyMeta
+- `InkComposeOverlay` + `applyInkStrokeToFlipbook`
+- Docs updated
 
 ## Remaining to 100%
 
-- Jetpack Ink full Compose overlay (deps + InProgressStrokes UI)
-- PCM→AAC re-encode when source is MP3
-- Infinite undo disk streaming
-- HEVC optional profile
+- Link androidx.ink deps + real InProgressStrokes
+- Wire UndoArchive snapshots on every endStroke into meta
+- PCM→AAC for non-AAC audio mux
+- Clip mask polish

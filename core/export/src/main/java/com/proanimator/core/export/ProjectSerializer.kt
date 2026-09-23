@@ -30,8 +30,9 @@ import java.util.zip.GZIPOutputStream
 /**
  * .pan format
  *
- * PAN1 (legacy): composite PNG per frame + meta
- * PAN2: per-layer PNG stacks + meta schema 3
+ * PAN1: composite PNG per frame
+ * PAN2: per-layer PNG stacks + meta (schema 3+)
+ * Meta may include "undo" from UndoArchive (eternal undo snapshots).
  */
 class ProjectSerializer(private val context: Context) {
 
@@ -39,14 +40,15 @@ class ProjectSerializer(private val context: Context) {
         private const val MAGIC_V1 = "PAN1"
         private const val MAGIC_V2 = "PAN2"
         private const val VERSION = 2
-        private const val META_SCHEMA = 3
+        private const val META_SCHEMA = 4
         private const val EXT = ".pan"
 
         fun buildMeta(
             brushId: String,
             onionEnabled: Boolean,
             timelineMode: String,
-            perform: PerformEngine
+            perform: PerformEngine,
+            undoJson: JSONObject? = null
         ): JSONObject {
             val tracksJson = JSONObject()
             AnimProperty.entries.forEach { prop ->
@@ -70,6 +72,7 @@ class ProjectSerializer(private val context: Context) {
                 put("onionEnabled", onionEnabled)
                 put("timelineMode", timelineMode)
                 put("tracks", tracksJson)
+                if (undoJson != null) put("undo", undoJson)
             }
         }
 
@@ -105,7 +108,8 @@ class ProjectSerializer(private val context: Context) {
             return MetaExtras(
                 brushId = meta.optString("brushId", "pen"),
                 onionEnabled = meta.optBoolean("onionEnabled", true),
-                timelineMode = meta.optString("timelineMode", "COMPOSE")
+                timelineMode = meta.optString("timelineMode", "COMPOSE"),
+                undo = meta.optJSONObject("undo")
             )
         }
 
@@ -119,7 +123,8 @@ class ProjectSerializer(private val context: Context) {
     data class MetaExtras(
         val brushId: String,
         val onionEnabled: Boolean,
-        val timelineMode: String
+        val timelineMode: String,
+        val undo: JSONObject? = null
     )
 
     data class ProjectData(
@@ -129,7 +134,6 @@ class ProjectSerializer(private val context: Context) {
         val currentFrameIndex: Int,
         val frames: List<ImageBitmap>,
         val meta: JSONObject = JSONObject(),
-        /** PAN2: parallel layer stacks; empty = composite-only */
         val layerStacks: List<LayerStack> = emptyList()
     )
 
@@ -204,7 +208,6 @@ class ProjectSerializer(private val context: Context) {
         }
     }
 
-    /** Legacy composite-only save (compat) */
     suspend fun save(
         data: ProjectData,
         fileName: String = "project_${System.currentTimeMillis()}"
@@ -268,7 +271,6 @@ class ProjectSerializer(private val context: Context) {
                 val magicBytes = ByteArray(4)
                 input.readFully(magicBytes)
                 val magic = String(magicBytes, Charsets.US_ASCII)
-
                 return when (magic) {
                     MAGIC_V2 -> loadPan2(input)
                     MAGIC_V1 -> loadPan1(input)
@@ -331,17 +333,12 @@ class ProjectSerializer(private val context: Context) {
         repeat(frameCount) {
             val layerCount = input.readInt()
             val activeIdx = input.readInt()
-            val stack = LayerStack(width, height, initialLayers = 0)
-            // LayerStack with 0 layers — rebuild manually via reflection-free API
-            // Use addLayer + replace
             val rebuilt = LayerStack(width, height, initialLayers = 1)
-            // clear default and rebuild
             if (layerCount == 0) {
                 stacks.add(rebuilt)
                 composites.add(rebuilt.composite())
                 return@repeat
             }
-            // First layer overwrites default
             for (li in 0 until layerCount) {
                 val name = input.readUTF()
                 val visible = input.readBoolean()
@@ -353,7 +350,6 @@ class ProjectSerializer(private val context: Context) {
                     ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 if (li == 0) {
                     rebuilt.replaceActiveBitmap(bmp.asImageBitmap())
-                    // patch name/visible/opacity via toggle + set — use layers list mutation helpers
                     patchLayerMeta(rebuilt, 0, name, visible, opacity)
                 } else {
                     rebuilt.addLayer(name)
@@ -397,7 +393,6 @@ class ProjectSerializer(private val context: Context) {
         opacity: Float
     ) {
         stack.setActive(index)
-        // LayerStack exposes layers() as copy — need mutators
         stack.setLayerMeta(index, name, visible, opacity)
     }
 
