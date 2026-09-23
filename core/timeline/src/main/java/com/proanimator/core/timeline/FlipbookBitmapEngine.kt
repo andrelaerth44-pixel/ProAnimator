@@ -2,6 +2,7 @@ package com.proanimator.core.timeline
 
 import android.graphics.Bitmap
 import android.graphics.PorterDuff
+import android.util.Base64
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -13,13 +14,14 @@ import com.proanimator.core.brushes.BrushPreset
 import com.proanimator.core.engine.ToolMode
 import com.proanimator.core.engine.TransformBake
 import com.proanimator.core.engine.WarpEngine
-import com.proanimator.core.export.UndoArchive
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 class FlipbookBitmapEngine(
@@ -293,19 +295,43 @@ class FlipbookBitmapEngine(
 
     fun undoDepth(): Int = undoStack.size
 
-    /** Export last N undo snapshots for PAN meta (eternal undo). */
-    fun exportUndoArchive(maxDepth: Int = UndoArchive.DEFAULT_DEPTH): JSONObject {
-        return UndoArchive.encode(undoStack.toList(), maxDepth)
+    /** Encode undo stack for PAN meta (self-contained, no export module dep). */
+    fun exportUndoArchive(maxDepth: Int = 8): JSONObject {
+        val arr = JSONArray()
+        undoStack.takeLast(maxDepth).forEach { (frame, bmp) ->
+            val baos = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.PNG, 90, baos)
+            val b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+            arr.put(JSONObject().apply {
+                put("frame", frame)
+                put("png", b64)
+            })
+        }
+        return JSONObject().apply {
+            put("version", 1)
+            put("depth", arr.length())
+            put("snapshots", arr)
+        }
     }
 
-    /** Restore undo stack from PAN meta after load. */
     fun restoreUndoArchive(undoJson: JSONObject?) {
         undoStack.clear()
         redoStack.clear()
-        val snaps = UndoArchive.decode(undoJson)
-        for (s in snaps) {
-            val bmp = UndoArchive.decodeBitmap(s.pngBase64) ?: continue
-            undoStack.add(s.frameIndex to bmp)
+        if (undoJson == null) {
+            updateUndoRedo()
+            return
+        }
+        val arr = undoJson.optJSONArray("snapshots") ?: run {
+            updateUndoRedo()
+            return
+        }
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val frame = o.getInt("frame")
+            val b64 = o.getString("png")
+            val bytes = Base64.decode(b64, Base64.NO_WRAP)
+            val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: continue
+            undoStack.add(frame to bmp)
         }
         updateUndoRedo()
     }
