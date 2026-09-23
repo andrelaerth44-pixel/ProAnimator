@@ -28,8 +28,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +56,7 @@ fun WorkspaceScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val config = LocalConfiguration.current
+    val density = LocalDensity.current
     val isTabletLandscape =
         config.screenWidthDp >= 840 && config.screenWidthDp > config.screenHeightDp
 
@@ -67,6 +70,9 @@ fun WorkspaceScreen() {
 
     var viewScale by remember { mutableFloatStateOf(1f) }
     var viewOffset by remember { mutableStateOf(Offset.Zero) }
+    var canvasViewW by remember { mutableFloatStateOf(0f) }
+    var canvasViewH by remember { mutableFloatStateOf(0f) }
+    var didInitialFit by remember { mutableStateOf(false) }
 
     val frames by flipbook.frames.collectAsState()
     val currentIndex by flipbook.currentIndex.collectAsState()
@@ -74,6 +80,7 @@ fun WorkspaceScreen() {
     val activeBrush by flipbook.brushEngine.activeBrush.collectAsState()
     val brushColor by flipbook.brushEngine.color.collectAsState()
     val sizeMul by flipbook.brushEngine.sizeMul.collectAsState()
+    val alphaLock by flipbook.brushEngine.alphaLock.collectAsState()
     val canUndo by flipbook.canUndo.collectAsState()
     val canRedo by flipbook.canRedo.collectAsState()
     val onionEnabled by flipbook.onionEnabled.collectAsState()
@@ -106,6 +113,22 @@ fun WorkspaceScreen() {
         frames.getOrNull(currentIndex)?.layers?.activeLayerIndex ?: 0
     }
 
+    fun applyFit() {
+        if (canvasViewW > 0f && canvasViewH > 0f) {
+            viewport.fitToScreen(canvasViewW, canvasViewH)
+            viewScale = viewport.scale
+            viewOffset = viewport.offset
+        }
+    }
+
+    // Fit once when canvas size known
+    LaunchedEffect(canvasViewW, canvasViewH) {
+        if (!didInitialFit && canvasViewW > 0f && canvasViewH > 0f) {
+            applyFit()
+            didInitialFit = true
+        }
+    }
+
     val filePickers = rememberFilePickLaunchers(
         context = context,
         onLottieUri = { uri ->
@@ -119,16 +142,25 @@ fun WorkspaceScreen() {
                 lottieImporter.importFromFile(file, flipbook.width, flipbook.height, 90)
                     .onSuccess {
                         flipbook.loadFrames(it.frames, 0)
-                        statusMessage = "Lottie ${it.frames.size}f @${it.fps}fps"
+                        applyFit()
+                        statusMessage = "Lottie ${it.frames.size}f · fit"
                     }
                     .onFailure { statusMessage = "Lottie fail" }
             }
         },
         onPanUri = { uri ->
             scope.launch {
-                statusMessage = WorkspaceScreenHooks.loadPanUri(
-                    serializer, flipbook, perform, timeline, uri
+                val (msg, vp) = WorkspaceScreenHooks.loadPanUri(
+                    serializer, flipbook, perform, timeline, uri,
+                    viewport, canvasViewW, canvasViewH
                 )
+                if (vp != null) {
+                    viewScale = vp.scale
+                    viewOffset = vp.offset
+                } else {
+                    applyFit()
+                }
+                statusMessage = msg
             }
         },
         onCreatePanUri = { uri ->
@@ -150,7 +182,7 @@ fun WorkspaceScreen() {
                             internal.inputStream().use { it.copyTo(out) }
                         }
                         statusMessage = "MP4 exported"
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         statusMessage = "MP4 copy fail"
                     }
                 }.onFailure { statusMessage = "MP4 fail" }
@@ -198,7 +230,7 @@ fun WorkspaceScreen() {
         }
     }
 
-    Column(Modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().height(if (isTabletLandscape) 40.dp else 36.dp)
                 .background(Color(0xFF1A1A1A)).padding(horizontal = 4.dp),
@@ -215,7 +247,12 @@ fun WorkspaceScreen() {
                 ToolButton("Load") { filePickers.pickPan() }
                 ToolButton("Lottie") { filePickers.pickLottie() }
                 ToolButton("MP4") { filePickers.createMp4("anim_${System.currentTimeMillis()}") }
+                ToolButton("αLock", selected = alphaLock) {
+                    flipbook.brushEngine.toggleAlphaLock()
+                    statusMessage = if (flipbook.brushEngine.alphaLock.value) "Alpha Lock ON" else "Alpha Lock OFF"
+                }
                 ToolButton("Layers", selected = showLayers) { showLayers = !showLayers }
+                ToolButton("Fit") { applyFit(); statusMessage = "Fit to screen" }
                 ToolButton("1:1") {
                     viewport.reset(); viewScale = 1f; viewOffset = Offset.Zero
                 }
@@ -261,7 +298,8 @@ fun WorkspaceScreen() {
                 valueRange = 0.5f..3f, modifier = Modifier.width(60.dp),
                 colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF)))
             Text("${(viewScale * 100).toInt()}%", color = Color.Gray, fontSize = 9.sp)
-            Text(InkBridge.describe().take(12), color = Color(0xFF666666), fontSize = 8.sp)
+            if (alphaLock) Text("αL", color = Color(0xFFFF9800), fontSize = 9.sp)
+            Text(InkBridge.describe().take(10), color = Color(0xFF666666), fontSize = 8.sp)
         }
 
         Row(
@@ -285,15 +323,26 @@ fun WorkspaceScreen() {
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (showLayers && isTabletLandscape) {
                 LayerPanel(
-                    layers = currentLayers, activeIndex = activeLayerIdx,
+                    layers = currentLayers,
+                    activeIndex = activeLayerIdx,
                     onSelect = { flipbook.setActiveLayer(it) },
                     onToggleVisible = { flipbook.toggleLayerVisibility(it) },
+                    onOpacity = { idx, op -> flipbook.setLayerOpacity(idx, op) },
                     onAdd = { flipbook.addLayer() },
                     onRemove = { flipbook.removeActiveLayer() }
                 )
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFF2C2C2C))) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(Color(0xFF2C2C2C))
+                    .onSizeChanged { sz ->
+                        canvasViewW = sz.width.toFloat()
+                        canvasViewH = sz.height.toFloat()
+                    }
+            ) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cell = 16f
                     var y = 0f; var row = 0
@@ -377,7 +426,13 @@ fun WorkspaceScreen() {
                 Column(modifier = Modifier.align(Alignment.TopStart).padding(6.dp)) {
                     Text("F${currentIndex + 1}/${frames.size} · L${activeLayerIdx + 1}",
                         color = Color.White.copy(0.85f), fontSize = 11.sp)
-                    Text("${activeBrush.name} · palm-safe", color = Color.White.copy(0.5f), fontSize = 9.sp)
+                    Text(
+                        buildString {
+                            append(activeBrush.name)
+                            if (alphaLock) append(" · αLock")
+                        },
+                        color = Color.White.copy(0.5f), fontSize = 9.sp
+                    )
                     if (isRecording) Text("PERFORM", color = Color.Red, fontSize = 9.sp)
                     Text("$performRevision$layerRev", color = Color.Transparent, fontSize = 1.sp)
                 }
@@ -403,9 +458,11 @@ fun WorkspaceScreen() {
 
             if (showLayers && !isTabletLandscape) {
                 LayerPanel(
-                    layers = currentLayers, activeIndex = activeLayerIdx,
+                    layers = currentLayers,
+                    activeIndex = activeLayerIdx,
                     onSelect = { flipbook.setActiveLayer(it) },
                     onToggleVisible = { flipbook.toggleLayerVisibility(it) },
+                    onOpacity = { idx, op -> flipbook.setLayerOpacity(idx, op) },
                     onAdd = { flipbook.addLayer() },
                     onRemove = { flipbook.removeActiveLayer() }
                 )
