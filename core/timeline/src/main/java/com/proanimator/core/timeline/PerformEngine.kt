@@ -4,9 +4,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * Perform mode — record live transforms; fully serializable via ProjectSerializer meta.
- */
 class PerformEngine {
 
     private val tracks = mutableMapOf<AnimProperty, PropertyTrack>().apply {
@@ -28,7 +25,6 @@ class PerformEngine {
     val rotation: StateFlow<Float> = _rotation.asStateFlow()
     val opacity: StateFlow<Float> = _opacity.asStateFlow()
 
-    /** Bump to force UI recomposition after load */
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision.asStateFlow()
 
@@ -52,10 +48,20 @@ class PerformEngine {
 
     fun recordDrag(frame: Int, dx: Float, dy: Float) {
         if (!_isRecording.value) return
-        val nx = _posX.value + dx
-        val ny = _posY.value + dy
-        recordAtFrame(frame, AnimProperty.POS_X, nx)
-        recordAtFrame(frame, AnimProperty.POS_Y, ny)
+        recordAtFrame(frame, AnimProperty.POS_X, _posX.value + dx)
+        recordAtFrame(frame, AnimProperty.POS_Y, _posY.value + dy)
+    }
+
+    /** Pinch while recording → scale keyframes */
+    fun recordScale(frame: Int, zoom: Float) {
+        if (!_isRecording.value) return
+        val s = (_scale.value * zoom).coerceIn(0.05f, 8f)
+        recordAtFrame(frame, AnimProperty.SCALE, s)
+    }
+
+    fun recordRotation(frame: Int, deltaDeg: Float) {
+        if (!_isRecording.value) return
+        recordAtFrame(frame, AnimProperty.ROTATION, _rotation.value + deltaDeg)
     }
 
     fun addKeyframe(

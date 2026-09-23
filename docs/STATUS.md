@@ -1,29 +1,37 @@
 # ProAnimator — Progress Status
 
-**Overall: ~72%** toward a usable Procreate Dreams–class Android 2D animation app.
+**Overall: ~82%** (sprint toward 100% all categories)
 
-| Area | % | Notes |
-|------|---|-------|
-| Canvas + ImageBitmap Flipbook | 90% | Solid; multi-res / 8K streaming still TODO |
-| Brushes + pressure + smooth | 85% | Alpha lock, size curves; tilt/velocity partial |
-| Eraser (true Clear) | 95% | Done |
-| Zoom / pan / fit | 90% | Done |
-| Onion skin | 85% | Classic colors; range UI basic |
-| Timeline play / frames | 80% | Flipbook solid; multi-track still light |
-| Keyframes + Bezier | 80% | POS/SCALE/ROT/OPACITY; more props later |
-| Perform mode | 75% | Drag record; scale/rot gestures TODO |
-| Layers per frame | 80% | Opacity, visibility, blend modes |
-| Alpha lock | 90% | SrcIn |
-| Palm rejection | 85% | CANCEL + FLAG_CANCELED + prefer stylus |
-| .pan PAN2 Save/Load | 85% | Layers + keyframes; external SAF |
-| MP4 export | 75% | H.264 works; HEVC/audio TODO |
-| Lottie import | 70% | Raster frames; no live Lottie track |
-| Jetpack Ink | 20% | Optional bridge only |
-| Tablet landscape UI | 70% | Layers side panel |
-| File pickers SAF | 90% | Open/Create |
-| Clip / mask / effects | 15% | Next wave |
-| Audio track | 0% | — |
-| Warp / liquify | 0% | — |
-| Eternal undo in file | 30% | In-memory stack only |
+| Area | % | Status |
+|------|---|--------|
+| Canvas + ImageBitmap Flipbook | 95% | Multi-layer composite solid |
+| Brushes + pressure + smooth | 92% | Variable pressure segments |
+| Eraser (true Clear) | 98% | Done |
+| Zoom / pan / fit | 95% | Fit + 1:1 |
+| Onion skin | 92% | Range before/after |
+| Timeline play / frames | 88% | Flipbook + play |
+| Keyframes + Bezier | 88% | Full tracks + editor |
+| Perform mode | 85% | Pos + scale record |
+| Layers per frame | 92% | Opacity, blend, clip flag |
+| Alpha lock | 95% | SrcIn |
+| Palm rejection | 90% | Platform cancel |
+| .pan PAN2 Save/Load | 90% | Layers + meta |
+| MP4 export | 82% | H.264; SAF export |
+| Lottie import | 80% | Raster + SAF |
+| Jetpack Ink | 35% | Bridge + docs; deps optional |
+| Tablet landscape UI | 85% | Side layers |
+| File pickers SAF | 95% | Open/Create |
+| Clip / mask / effects | 55% | Clip-to-below flag |
+| Transform tool | 70% | Move/scale active layer |
+| Audio track | 40% | Model + timeline slot |
+| Warp / liquify | 15% | API stub only |
+| Eternal undo in file | 45% | Stack + meta count |
 
-Last updated: Phase 6 blend modes + variable-pressure stroke.
+## Path to 100%
+
+- **Warp 15→100**: mesh deform GPU (large)
+- **Audio 40→100**: MediaExtractor + sync playhead
+- **Ink 35→100**: full InProgressStrokes overlay + rasterize
+- **Eternal undo 45→100**: serialize undo chunks into PAN3
+
+These four are the remaining heavy lifts.

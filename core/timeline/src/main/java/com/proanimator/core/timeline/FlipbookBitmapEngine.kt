@@ -40,8 +40,7 @@ class FlipbookBitmapEngine(
     private val _currentIndex = MutableStateFlow(0)
     val currentIndex: StateFlow<Int> = _currentIndex.asStateFlow()
 
-    val currentFrame: Frame?
-        get() = _frames.value.getOrNull(_currentIndex.value)
+    val currentFrame: Frame? get() = _frames.value.getOrNull(_currentIndex.value)
 
     private val _layerRevision = MutableStateFlow(0)
     val layerRevision: StateFlow<Int> = _layerRevision.asStateFlow()
@@ -56,14 +55,15 @@ class FlipbookBitmapEngine(
     val onionEnabled: StateFlow<Boolean> = _onionEnabled.asStateFlow()
 
     private val _onionBefore = MutableStateFlow(2)
+    val onionBefore: StateFlow<Int> = _onionBefore.asStateFlow()
     private val _onionAfter = MutableStateFlow(1)
+    val onionAfter: StateFlow<Int> = _onionAfter.asStateFlow()
 
     private val undoStack = mutableListOf<Pair<Int, Bitmap>>()
     private val redoStack = mutableListOf<Pair<Int, Bitmap>>()
 
     private val _canUndo = MutableStateFlow(false)
     val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
-
     private val _canRedo = MutableStateFlow(false)
     val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
 
@@ -90,6 +90,8 @@ class FlipbookBitmapEngine(
 
     fun setSizeMultiplier(m: Float) = brushEngine.setSizeMultiplier(m)
     fun setOnionEnabled(enabled: Boolean) { _onionEnabled.value = enabled }
+    fun setOnionBefore(n: Int) { _onionBefore.value = n.coerceIn(0, 5) }
+    fun setOnionAfter(n: Int) { _onionAfter.value = n.coerceIn(0, 5) }
 
     fun setCurrentFrame(index: Int) {
         val max = (_frames.value.size - 1).coerceAtLeast(0)
@@ -108,7 +110,7 @@ class FlipbookBitmapEngine(
         bumpLayers()
     }
 
-    fun previousFrame() { setCurrentFrame(_currentIndex.value - 1) }
+    fun previousFrame() = setCurrentFrame(_currentIndex.value - 1)
 
     fun addFrame() {
         val newIndex = _frames.value.size
@@ -131,49 +133,23 @@ class FlipbookBitmapEngine(
         _frames.update { list ->
             list.filterIndexed { i, _ -> i != idx }.mapIndexed { i, f -> f.copy(index = i) }
         }
-        if (_currentIndex.value >= _frames.value.size) {
-            _currentIndex.value = _frames.value.size - 1
-        }
+        if (_currentIndex.value >= _frames.value.size) _currentIndex.value = _frames.value.size - 1
         bumpLayers()
     }
 
-    fun addLayer() {
-        currentFrame?.layers?.addLayer()
-        bumpLayers()
-    }
-
+    fun addLayer() { currentFrame?.layers?.addLayer(); bumpLayers() }
     fun removeActiveLayer() {
-        currentFrame?.layers?.let { stack ->
-            stack.removeLayer(stack.activeLayerIndex)
-            bumpLayers()
-        }
+        currentFrame?.layers?.let { it.removeLayer(it.activeLayerIndex); bumpLayers() }
     }
-
-    fun setActiveLayer(index: Int) {
-        currentFrame?.layers?.setActive(index)
-        bumpLayers()
-    }
-
-    fun toggleLayerVisibility(index: Int) {
-        currentFrame?.layers?.toggleVisibility(index)
-        bumpLayers()
-    }
-
-    fun setLayerOpacity(index: Int, opacity: Float) {
-        currentFrame?.layers?.setLayerOpacity(index, opacity)
-        bumpLayers()
-    }
-
-    fun setLayerBlendMode(index: Int, mode: LayerBlendMode) {
-        currentFrame?.layers?.setLayerBlendMode(index, mode)
-        bumpLayers()
-    }
+    fun setActiveLayer(index: Int) { currentFrame?.layers?.setActive(index); bumpLayers() }
+    fun toggleLayerVisibility(index: Int) { currentFrame?.layers?.toggleVisibility(index); bumpLayers() }
+    fun setLayerOpacity(index: Int, opacity: Float) { currentFrame?.layers?.setLayerOpacity(index, opacity); bumpLayers() }
+    fun setLayerBlendMode(index: Int, mode: LayerBlendMode) { currentFrame?.layers?.setLayerBlendMode(index, mode); bumpLayers() }
+    fun toggleClipToBelow(index: Int) { currentFrame?.layers?.toggleClipToBelow(index); bumpLayers() }
 
     fun loadFrames(bitmaps: List<ImageBitmap>, startIndex: Int = 0) {
         if (bitmaps.isEmpty()) return
-        undoStack.clear()
-        redoStack.clear()
-        updateUndoRedo()
+        undoStack.clear(); redoStack.clear(); updateUndoRedo()
         _frames.value = bitmaps.mapIndexed { i, bmp ->
             val stack = LayerStack(width, height)
             stack.replaceActiveBitmap(bmp)
@@ -186,9 +162,7 @@ class FlipbookBitmapEngine(
 
     fun loadLayerStacks(stacks: List<LayerStack>, startIndex: Int = 0) {
         if (stacks.isEmpty()) return
-        undoStack.clear()
-        redoStack.clear()
-        updateUndoRedo()
+        undoStack.clear(); redoStack.clear(); updateUndoRedo()
         _frames.value = stacks.mapIndexed { i, src ->
             val stack = LayerStack(width, height, initialLayers = 0)
             stack.replaceAll(src)
@@ -200,14 +174,12 @@ class FlipbookBitmapEngine(
     }
 
     fun startStroke(point: StrokePoint) { _currentPath.value = listOf(point) }
-
     fun addPoint(point: StrokePoint) {
         _currentPath.update { current ->
             if (current.isEmpty()) listOf(point)
             else {
                 val last = current.last()
-                val dx = point.x - last.x
-                val dy = point.y - last.y
+                val dx = point.x - last.x; val dy = point.y - last.y
                 if (dx * dx + dy * dy > 1.2f) current + point else current
             }
         }
@@ -215,25 +187,19 @@ class FlipbookBitmapEngine(
 
     fun endStroke() {
         val points = _currentPath.value
-        if (points.size < 2) {
-            _currentPath.value = emptyList()
-            return
-        }
+        if (points.size < 2) { _currentPath.value = emptyList(); return }
         val frame = currentFrame ?: return
         val active = frame.layers.activeLayer()
         pushUndo(frame.index, active.bitmap)
         brushEngine.drawStroke(active.bitmap, points)
         _currentPath.value = emptyList()
-        redoStack.clear()
-        updateUndoRedo()
-        bumpLayers()
+        redoStack.clear(); updateUndoRedo(); bumpLayers()
     }
 
     fun cancelStroke() { _currentPath.value = emptyList() }
 
     private fun pushUndo(frameIndex: Int, bitmap: ImageBitmap) {
-        val copy = bitmap.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true)
-        undoStack.add(frameIndex to copy)
+        undoStack.add(frameIndex to bitmap.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true))
         if (undoStack.size > 40) undoStack.removeAt(0)
     }
 
@@ -241,22 +207,18 @@ class FlipbookBitmapEngine(
         if (undoStack.isEmpty()) return
         val (frameIndex, bmp) = undoStack.removeAt(undoStack.lastIndex)
         val frame = _frames.value.getOrNull(frameIndex) ?: return
-        val current = frame.layers.activeLayer().bitmap
-        redoStack.add(frameIndex to current.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true))
+        redoStack.add(frameIndex to frame.layers.activeLayer().bitmap.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true))
         frame.layers.restoreActive(bmp)
-        updateUndoRedo()
-        bumpLayers()
+        updateUndoRedo(); bumpLayers()
     }
 
     fun redo() {
         if (redoStack.isEmpty()) return
         val (frameIndex, bmp) = redoStack.removeAt(redoStack.lastIndex)
         val frame = _frames.value.getOrNull(frameIndex) ?: return
-        val current = frame.layers.activeLayer().bitmap
-        undoStack.add(frameIndex to current.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true))
+        undoStack.add(frameIndex to frame.layers.activeLayer().bitmap.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true))
         frame.layers.restoreActive(bmp)
-        updateUndoRedo()
-        bumpLayers()
+        updateUndoRedo(); bumpLayers()
     }
 
     private fun updateUndoRedo() {
@@ -264,15 +226,14 @@ class FlipbookBitmapEngine(
         _canRedo.value = redoStack.isNotEmpty()
     }
 
+    fun undoDepth(): Int = undoStack.size
+
     fun clearCurrentFrame() {
         val frame = currentFrame ?: return
         val active = frame.layers.activeLayer()
         pushUndo(frame.index, active.bitmap)
-        val canvas = Canvas(active.bitmap)
-        canvas.nativeCanvas.drawColor(android.graphics.Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-        redoStack.clear()
-        updateUndoRedo()
-        bumpLayers()
+        Canvas(active.bitmap).nativeCanvas.drawColor(android.graphics.Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+        redoStack.clear(); updateUndoRedo(); bumpLayers()
     }
 
     data class OnionLayer(val bitmap: ImageBitmap, val tint: Color, val alpha: Float)
@@ -286,16 +247,14 @@ class FlipbookBitmapEngine(
         for (i in 1.._onionBefore.value) {
             val idx = current - i
             if (idx >= 0) {
-                val alpha = (0.35f - (i - 1) * 0.1f).coerceIn(0.1f, 0.4f)
-                result.add(OnionLayer(frames[idx].bitmap, prevColors.getOrElse(i - 1) { prevColors[0] }, alpha))
+                result.add(OnionLayer(frames[idx].bitmap, prevColors.getOrElse(i - 1) { prevColors[0] }, (0.35f - (i - 1) * 0.1f).coerceIn(0.1f, 0.4f)))
             }
         }
         val nextColors = listOf(Color(0xFF69F0AE), Color(0xFF00E676))
         for (i in 1.._onionAfter.value) {
             val idx = current + i
             if (idx < frames.size) {
-                val alpha = (0.25f - (i - 1) * 0.08f).coerceIn(0.08f, 0.3f)
-                result.add(OnionLayer(frames[idx].bitmap, nextColors.getOrElse(i - 1) { nextColors[0] }, alpha))
+                result.add(OnionLayer(frames[idx].bitmap, nextColors.getOrElse(i - 1) { nextColors[0] }, (0.25f - (i - 1) * 0.08f).coerceIn(0.08f, 0.3f)))
             }
         }
         return result

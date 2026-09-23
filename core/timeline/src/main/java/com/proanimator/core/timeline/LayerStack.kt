@@ -11,13 +11,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import java.util.UUID
 
 enum class LayerBlendMode {
-    NORMAL,
-    MULTIPLY,
-    SCREEN,
-    OVERLAY,
-    ADD,
-    DARKEN,
-    LIGHTEN
+    NORMAL, MULTIPLY, SCREEN, OVERLAY, ADD, DARKEN, LIGHTEN
 }
 
 data class DrawLayer(
@@ -26,7 +20,9 @@ data class DrawLayer(
     val bitmap: ImageBitmap,
     var visible: Boolean = true,
     var opacity: Float = 1f,
-    var blendMode: LayerBlendMode = LayerBlendMode.NORMAL
+    var blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
+    /** Clip to layer below (mask) */
+    var clipToBelow: Boolean = false
 )
 
 class LayerStack(
@@ -82,15 +78,26 @@ class LayerStack(
 
     fun setLayerOpacity(index: Int, opacity: Float) {
         if (index in layers.indices) {
-            val L = layers[index]
-            layers[index] = L.copy(opacity = opacity.coerceIn(0f, 1f))
+            layers[index] = layers[index].copy(opacity = opacity.coerceIn(0f, 1f))
         }
     }
 
     fun setLayerBlendMode(index: Int, mode: LayerBlendMode) {
         if (index in layers.indices) {
+            layers[index] = layers[index].copy(blendMode = mode)
+        }
+    }
+
+    fun setClipToBelow(index: Int, clip: Boolean) {
+        if (index in layers.indices) {
+            layers[index] = layers[index].copy(clipToBelow = clip)
+        }
+    }
+
+    fun toggleClipToBelow(index: Int) {
+        if (index in layers.indices) {
             val L = layers[index]
-            layers[index] = L.copy(blendMode = mode)
+            layers[index] = L.copy(clipToBelow = !L.clipToBelow)
         }
     }
 
@@ -99,15 +106,14 @@ class LayerStack(
         name: String,
         visible: Boolean,
         opacity: Float,
-        blendMode: LayerBlendMode = LayerBlendMode.NORMAL
+        blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
+        clipToBelow: Boolean = false
     ) {
         if (index !in layers.indices) return
-        val L = layers[index]
-        layers[index] = L.copy(
-            name = name,
-            visible = visible,
+        layers[index] = layers[index].copy(
+            name = name, visible = visible,
             opacity = opacity.coerceIn(0f, 1f),
-            blendMode = blendMode
+            blendMode = blendMode, clipToBelow = clipToBelow
         )
     }
 
@@ -115,13 +121,34 @@ class LayerStack(
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val c = AndroidCanvas(out)
         c.drawColor(AndroidColor.TRANSPARENT, PorterDuff.Mode.CLEAR)
-        layers.forEach { layer ->
-            if (!layer.visible) return@forEach
+
+        layers.forEachIndexed { index, layer ->
+            if (!layer.visible) return@forEachIndexed
             val paint = android.graphics.Paint().apply {
                 alpha = (layer.opacity.coerceIn(0f, 1f) * 255).toInt()
                 xfermode = porterDuff(layer.blendMode)
             }
-            c.drawBitmap(layer.bitmap.asAndroidBitmap(), 0f, 0f, paint)
+
+            if (layer.clipToBelow && index > 0) {
+                // DST_IN style clip: draw layer then keep only intersection with below
+                val layerBmp = layer.bitmap.asAndroidBitmap()
+                val tmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val tc = AndroidCanvas(tmp)
+                // rebuild below composite roughly: use current `out` as mask base
+                tc.drawBitmap(out, 0f, 0f, null)
+                val clipPaint = android.graphics.Paint().apply {
+                    xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                    alpha = paint.alpha
+                }
+                tc.drawBitmap(layerBmp, 0f, 0f, clipPaint)
+                val merge = android.graphics.Paint().apply {
+                    xfermode = porterDuff(layer.blendMode)
+                }
+                c.drawBitmap(tmp, 0f, 0f, merge)
+                tmp.recycle()
+            } else {
+                c.drawBitmap(layer.bitmap.asAndroidBitmap(), 0f, 0f, paint)
+            }
         }
         return out.asImageBitmap()
     }
@@ -153,11 +180,11 @@ class LayerStack(
         activeLayer().bitmap.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, true)
 
     fun restoreActive(bmp: Bitmap) {
-        val i = activeLayerIndex.coerceIn(0, layers.lastIndex.coerceAtLeast(0))
         if (layers.isEmpty()) {
             layers.add(DrawLayer(name = "Layer 1", bitmap = bmp.asImageBitmap()))
             return
         }
+        val i = activeLayerIndex.coerceIn(0, layers.lastIndex)
         layers[i] = layers[i].copy(bitmap = bmp.asImageBitmap())
     }
 
@@ -168,15 +195,11 @@ class LayerStack(
                 .copy(Bitmap.Config.ARGB_8888, true).asImageBitmap()
             layers.add(src.copy(id = UUID.randomUUID().toString(), bitmap = copy))
         }
-        if (layers.isEmpty()) {
-            layers.add(DrawLayer(name = "Layer 1", bitmap = emptyBitmap()))
-        }
+        if (layers.isEmpty()) layers.add(DrawLayer(name = "Layer 1", bitmap = emptyBitmap()))
         activeLayerIndex = other.activeLayerIndex.coerceIn(0, layers.lastIndex)
     }
 
-    fun replaceAll(from: LayerStack) {
-        duplicateFrom(from)
-    }
+    fun replaceAll(from: LayerStack) = duplicateFrom(from)
 
     private fun emptyBitmap(): ImageBitmap =
         Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).asImageBitmap()
