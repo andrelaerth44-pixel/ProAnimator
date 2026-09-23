@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,6 +53,9 @@ import kotlinx.coroutines.launch
 fun WorkspaceScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val config = LocalConfiguration.current
+    val isTabletLandscape = config.screenWidthDp >= 840 &&
+        config.screenWidthDp > config.screenHeightDp
 
     val flipbook = remember { FlipbookBitmapEngine(width = 1920, height = 1080) }
     val timeline = remember { TimelineEngine() }
@@ -73,6 +77,7 @@ fun WorkspaceScreen() {
     val canUndo by flipbook.canUndo.collectAsState()
     val canRedo by flipbook.canRedo.collectAsState()
     val onionEnabled by flipbook.onionEnabled.collectAsState()
+    val layerRev by flipbook.layerRevision.collectAsState()
 
     val isPlaying by timeline.isPlaying.collectAsState()
     val timelineMode by timeline.mode.collectAsState()
@@ -88,12 +93,69 @@ fun WorkspaceScreen() {
     var showProjects by remember { mutableStateOf(false) }
     var projectList by remember { mutableStateOf(serializer.listProjects()) }
     var showBezier by remember { mutableStateOf(false) }
+    var showLayers by remember { mutableStateOf(isTabletLandscape) }
     var selectedProp by remember { mutableStateOf(AnimProperty.POS_X) }
     var bezierX1 by remember { mutableFloatStateOf(0.42f) }
     var bezierY1 by remember { mutableFloatStateOf(0f) }
     var bezierX2 by remember { mutableFloatStateOf(0.58f) }
     var bezierY2 by remember { mutableFloatStateOf(1f) }
     var selectedEasing by remember { mutableStateOf(EasingType.BEZIER) }
+
+    val currentLayers = remember(currentIndex, layerRev, frames) {
+        frames.getOrNull(currentIndex)?.layers?.layers() ?: emptyList()
+    }
+    val activeLayerIdx = remember(currentIndex, layerRev, frames) {
+        frames.getOrNull(currentIndex)?.layers?.activeLayerIndex ?: 0
+    }
+
+    val filePickers = rememberFilePickLaunchers(
+        context = context,
+        onLottieUri = { uri ->
+            scope.launch {
+                statusMessage = "Import Lottie…"
+                val file = context.copyUriToCache(uri, ".json")
+                if (file == null) {
+                    statusMessage = "Lottie open failed"
+                    return@launch
+                }
+                lottieImporter.importFromFile(
+                    file,
+                    targetWidth = flipbook.width,
+                    targetHeight = flipbook.height,
+                    maxFrames = 90
+                ).onSuccess { imp ->
+                    flipbook.loadFrames(imp.frames, 0)
+                    statusMessage = "Lottie ${imp.frames.size}f @${imp.fps}fps"
+                }.onFailure {
+                    statusMessage = "Lottie fail: ${it.message?.take(32)}"
+                }
+            }
+        },
+        onPanUri = { uri ->
+            scope.launch {
+                statusMessage = "Load .pan…"
+                val file = context.copyUriToCache(uri, ".pan")
+                if (file == null) {
+                    statusMessage = "PAN open failed"
+                    return@launch
+                }
+                serializer.load(file).onSuccess { data ->
+                    flipbook.loadFrames(data.frames, data.currentFrameIndex)
+                    val extras = ProjectSerializer.applyMeta(data.meta, perform)
+                    flipbook.setOnionEnabled(extras.onionEnabled)
+                    BrushLibrary.ALL.find { it.id == extras.brushId }?.let { flipbook.setBrush(it) }
+                    try {
+                        timeline.setMode(TimelineMode.valueOf(extras.timelineMode))
+                    } catch (_: Exception) {}
+                    perform.evaluate(data.currentFrameIndex.toFloat())
+                    statusMessage =
+                        "Loaded .pan ${data.frames.size}f / ${perform.keyframeCount()} KF"
+                }.onFailure {
+                    statusMessage = "PAN fail: ${it.message?.take(32)}"
+                }
+            }
+        }
+    )
 
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
@@ -137,77 +199,47 @@ fun WorkspaceScreen() {
                     currentIndex, flipbook.getAllBitmaps(), meta
                 )
             ).onSuccess {
-                statusMessage = "Saved ${it.name} (${perform.keyframeCount()} KFs)"
+                statusMessage = "Saved ${it.name}"
                 projectList = serializer.listProjects()
             }.onFailure { statusMessage = "Save fail" }
         }
     }
 
-    fun doLoad(file: java.io.File) {
-        scope.launch {
-            serializer.load(file).onSuccess { data ->
-                flipbook.loadFrames(data.frames, data.currentFrameIndex)
-                val extras = ProjectSerializer.applyMeta(data.meta, perform)
-                flipbook.setOnionEnabled(extras.onionEnabled)
-                BrushLibrary.ALL.find { it.id == extras.brushId }?.let { flipbook.setBrush(it) }
-                try { timeline.setMode(TimelineMode.valueOf(extras.timelineMode)) } catch (_: Exception) {}
-                perform.evaluate(data.currentFrameIndex.toFloat())
-                statusMessage = "Loaded ${data.frames.size}f / ${perform.keyframeCount()} KF"
-                showProjects = false
-            }.onFailure { statusMessage = "Load fail" }
-        }
-    }
-
-    fun doImportLottie() {
-        scope.launch {
-            statusMessage = "Import Lottie…"
-            // Demo: try common asset names; user can place JSON in assets/
-            val candidates = listOf("demo.json", "animation.json", "lottie.json")
-            var done = false
-            for (name in candidates) {
-                val result = lottieImporter.importFromAssets(
-                    name,
-                    targetWidth = flipbook.width,
-                    targetHeight = flipbook.height,
-                    maxFrames = 60
-                )
-                result.onSuccess { imp ->
-                    flipbook.loadFrames(imp.frames, 0)
-                    statusMessage = "Lottie: ${imp.name} ${imp.frames.size} frames @${imp.fps}fps"
-                    done = true
-                }
-                if (done) break
-            }
-            if (!done) {
-                statusMessage = "Put .json in assets/ as demo.json (Lottie)"
-            }
-        }
-    }
-
     Column(modifier = Modifier.fillMaxSize()) {
 
+        // Top bar
         Row(
-            modifier = Modifier.fillMaxWidth().height(36.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (isTabletLandscape) 40.dp else 36.dp)
+                .background(Color(0xFF1A1A1A))
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("ProAnimator", color = Color(0xFFBB86FC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "ProAnimator",
+                color = Color(0xFFBB86FC),
+                fontSize = if (isTabletLandscape) 13.sp else 11.sp,
+                fontWeight = FontWeight.Bold
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 ToolButton("Undo", enabled = canUndo) { flipbook.undo() }
                 ToolButton("Redo", enabled = canRedo) { flipbook.redo() }
                 ToolButton("Save") { doSave() }
-                ToolButton("Load") {
-                    projectList = serializer.listProjects()
-                    showProjects = !showProjects
-                }
+                ToolButton("Load") { filePickers.pickPan() }
+                ToolButton("Lottie") { filePickers.pickLottie() }
                 ToolButton("MP4") {
                     scope.launch {
                         exportEngine.exportMp4(
-                            flipbook.getAllBitmaps(), flipbook.width, flipbook.height, timeline.fps.value
+                            flipbook.getAllBitmaps(),
+                            flipbook.width,
+                            flipbook.height,
+                            timeline.fps.value
                         ).onSuccess { statusMessage = "MP4 ok" }
                     }
                 }
-                ToolButton("Lottie") { doImportLottie() }
+                ToolButton("Layers", selected = showLayers) { showLayers = !showLayers }
                 ToolButton("1:1") {
                     viewport.reset()
                     viewScale = 1f
@@ -220,25 +252,28 @@ fun WorkspaceScreen() {
             }
         }
 
-        if (showProjects) {
-            Column(Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(8.dp)) {
-                projectList.take(6).forEach { f ->
-                    Text(f.name, color = Color(0xFF03DAC6), fontSize = 11.sp,
-                        modifier = Modifier.clickable { doLoad(f) }.padding(4.dp))
-                }
-                Text("Close", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.clickable { showProjects = false })
-            }
-        }
-
         statusMessage?.let {
-            Text(it, color = Color(0xFF03DAC6), fontSize = 10.sp,
-                modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp, vertical = 2.dp))
-            LaunchedEffect(it) { delay(2800); statusMessage = null }
+            Text(
+                it,
+                color = Color(0xFF03DAC6),
+                fontSize = 10.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF1A1A1A))
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+            LaunchedEffect(it) {
+                delay(2800)
+                statusMessage = null
+            }
         }
 
         // Brush row
         Row(
-            modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(horizontal = 6.dp, vertical = 3.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF222222))
+                .padding(horizontal = 6.dp, vertical = 3.dp)
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -246,31 +281,51 @@ fun WorkspaceScreen() {
             BrushLibrary.ALL.forEach { preset ->
                 val sel = activeBrush.id == preset.id
                 Box(
-                    modifier = Modifier.clip(RoundedCornerShape(4.dp))
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
                         .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF333333))
                         .clickable { flipbook.setBrush(preset) }
                         .padding(horizontal = 7.dp, vertical = 3.dp)
-                ) { Text(preset.name, color = Color.White, fontSize = 9.sp) }
+                ) {
+                    Text(preset.name, color = Color.White, fontSize = 9.sp)
+                }
             }
             if (!activeBrush.isEraser) {
                 colors.forEach { c ->
                     val sel = brushColor == c
-                    Box(modifier = Modifier.size(13.dp).clip(CircleShape).background(Color(c))
-                        .border(if (sel) 2.dp else 1.dp, if (sel) Color.White else Color.Gray, CircleShape)
-                        .clickable { flipbook.setBrushColor(c) })
+                    Box(
+                        modifier = Modifier
+                            .size(13.dp)
+                            .clip(CircleShape)
+                            .background(Color(c))
+                            .border(
+                                if (sel) 2.dp else 1.dp,
+                                if (sel) Color.White else Color.Gray,
+                                CircleShape
+                            )
+                            .clickable { flipbook.setBrushColor(c) }
+                    )
                 }
             }
             Slider(
-                value = sizeMul, onValueChange = { flipbook.setSizeMultiplier(it) },
-                valueRange = 0.5f..3f, modifier = Modifier.width(60.dp),
-                colors = SliderDefaults.colors(thumbColor = Color(0xFFBB86FC), activeTrackColor = Color(0xFF7C4DFF))
+                value = sizeMul,
+                onValueChange = { flipbook.setSizeMultiplier(it) },
+                valueRange = 0.5f..3f,
+                modifier = Modifier.width(60.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = Color(0xFFBB86FC),
+                    activeTrackColor = Color(0xFF7C4DFF)
+                )
             )
             Text("${(viewScale * 100).toInt()}%", color = Color.Gray, fontSize = 9.sp)
-            Text(InkBridge.describe().take(12), color = Color(0xFF666666), fontSize = 8.sp)
+            Text(InkBridge.describe().take(14), color = Color(0xFF666666), fontSize = 8.sp)
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth().background(Color(0xFF1C1C1C)).padding(horizontal = 6.dp, vertical = 2.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF1C1C1C))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
@@ -278,40 +333,61 @@ fun WorkspaceScreen() {
             EasingType.entries.forEach { e ->
                 val sel = selectedEasing == e
                 Box(
-                    modifier = Modifier.clip(RoundedCornerShape(3.dp))
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
                         .background(if (sel) Color(0xFFFF9800) else Color(0xFF2A2A2A))
                         .clickable { selectedEasing = e }
                         .padding(horizontal = 5.dp, vertical = 2.dp)
-                ) { Text(e.name.take(6), color = Color.White, fontSize = 8.sp) }
+                ) {
+                    Text(e.name.take(6), color = Color.White, fontSize = 8.sp)
+                }
             }
         }
 
+        // Main content: tablet = canvas + side panels; phone = stacked
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            Box(modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFF2C2C2C))) {
-                // Checkerboard (screen space)
+            if (showLayers && isTabletLandscape) {
+                LayerPanel(
+                    layers = currentLayers,
+                    activeIndex = activeLayerIdx,
+                    onSelect = { flipbook.setActiveLayer(it) },
+                    onToggleVisible = { flipbook.toggleLayerVisibility(it) },
+                    onAdd = { flipbook.addLayer() },
+                    onRemove = { flipbook.removeActiveLayer() }
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(Color(0xFF2C2C2C))
+            ) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cell = 16f
-                    var y = 0f; var row = 0
+                    var y = 0f
+                    var row = 0
                     while (y < size.height) {
-                        var x = 0f; var col = 0
+                        var x = 0f
+                        var col = 0
                         while (x < size.width) {
                             drawRect(
                                 color = if ((row + col) % 2 == 0) Color(0xFF3A3A3A) else Color(0xFF2E2E2E),
                                 topLeft = Offset(x, y),
                                 size = androidx.compose.ui.geometry.Size(cell, cell)
                             )
-                            x += cell; col++
+                            x += cell
+                            col++
                         }
-                        y += cell; row++
+                        y += cell
+                        row++
                     }
                 }
 
-                // Drawing layer: zoom/pan via withTransform + dual pointer handlers
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        // Two-finger zoom/pan
                         .pointerInput(Unit) {
                             detectTransformGestures { centroid, pan, zoom, _ ->
                                 viewport.applyZoomPan(centroid, pan, zoom)
@@ -319,19 +395,22 @@ fun WorkspaceScreen() {
                                 viewOffset = viewport.offset
                             }
                         }
-                        // One-finger / stylus pressure stroke
                         .pointerInput(isRecording, viewScale, viewOffset) {
                             if (isRecording) {
                                 detectTransformGestures { _, pan, _, _ ->
-                                    perform.recordDrag(currentIndex, pan.x / viewScale, pan.y / viewScale)
+                                    perform.recordDrag(
+                                        currentIndex,
+                                        pan.x / viewScale,
+                                        pan.y / viewScale
+                                    )
                                 }
                             } else {
                                 detectPressureStroke(
                                     onStart = { flipbook.startStroke(it) },
                                     onMove = { flipbook.addPoint(it) },
                                     onEnd = { flipbook.endStroke() },
+                                    onCancel = { flipbook.cancelStroke() },
                                     toCanvas = { screen ->
-                                        // Inverse of view transform
                                         Offset(
                                             screen.x / viewScale - viewOffset.x,
                                             screen.y / viewScale - viewOffset.y
@@ -344,7 +423,6 @@ fun WorkspaceScreen() {
                     withTransform({
                         scale(viewScale, viewScale)
                         translate(viewOffset.x, viewOffset.y)
-                        // Perform transforms on content
                         translate(perfX, perfY)
                         scale(perfScale, perfScale)
                         rotate(perfRot)
@@ -360,7 +438,10 @@ fun WorkspaceScreen() {
                             )
                         }
                         frames.getOrNull(currentIndex)?.let {
-                            drawImage(image = it.bitmap, alpha = perfOpacity.coerceIn(0.05f, 1f))
+                            drawImage(
+                                image = it.bitmap,
+                                alpha = perfOpacity.coerceIn(0.05f, 1f)
+                            )
                         }
                         if (currentPath.size > 1 && !isRecording) {
                             val path = Path().apply {
@@ -373,36 +454,71 @@ fun WorkspaceScreen() {
                                 (0.4f + 0.6f * (currentPath.lastOrNull()?.pressure ?: 1f))
                             drawPath(
                                 path,
-                                if (activeBrush.isEraser) Color.Gray.copy(0.4f) else Color(brushColor),
-                                style = Stroke(w, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                                if (activeBrush.isEraser) Color.Gray.copy(0.4f)
+                                else Color(brushColor),
+                                style = Stroke(
+                                    w,
+                                    cap = StrokeCap.Round,
+                                    join = StrokeJoin.Round
+                                )
                             )
                         }
                     }
                 }
 
                 Column(modifier = Modifier.align(Alignment.TopStart).padding(6.dp)) {
-                    Text("F${currentIndex + 1}/${frames.size}", color = Color.White.copy(0.85f), fontSize = 11.sp)
-                    Text("${activeBrush.name} · pinch zoom", color = Color.White.copy(0.5f), fontSize = 9.sp)
+                    Text(
+                        "F${currentIndex + 1}/${frames.size} · L${activeLayerIdx + 1}",
+                        color = Color.White.copy(0.85f),
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        "${activeBrush.name} · palm-safe",
+                        color = Color.White.copy(0.5f),
+                        fontSize = 9.sp
+                    )
                     if (isRecording) Text("PERFORM", color = Color.Red, fontSize = 9.sp)
-                    Text("$performRevision", color = Color.Transparent, fontSize = 1.sp)
+                    Text("$performRevision$layerRev", color = Color.Transparent, fontSize = 1.sp)
                 }
                 Text(
                     if (onionEnabled) "Onion" else "Off",
                     color = if (onionEnabled) Color(0xFF03DAC6) else Color.Gray,
                     fontSize = 9.sp,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
                         .clickable { flipbook.setOnionEnabled(!onionEnabled) }
                 )
             }
 
             if (showBezier) {
                 BezierEditor(
-                    x1 = bezierX1, y1 = bezierY1, x2 = bezierX2, y2 = bezierY2,
+                    x1 = bezierX1,
+                    y1 = bezierY1,
+                    x2 = bezierX2,
+                    y2 = bezierY2,
                     onChange = { a, b, c, d ->
-                        bezierX1 = a; bezierY1 = b; bezierX2 = c; bezierY2 = d
+                        bezierX1 = a
+                        bezierY1 = b
+                        bezierX2 = c
+                        bezierY2 = d
                         selectedEasing = EasingType.BEZIER
                     },
-                    modifier = Modifier.width(160.dp).fillMaxHeight().padding(4.dp)
+                    modifier = Modifier
+                        .width(if (isTabletLandscape) 180.dp else 160.dp)
+                        .fillMaxHeight()
+                        .padding(4.dp)
+                )
+            }
+
+            if (showLayers && !isTabletLandscape) {
+                LayerPanel(
+                    layers = currentLayers,
+                    activeIndex = activeLayerIdx,
+                    onSelect = { flipbook.setActiveLayer(it) },
+                    onToggleVisible = { flipbook.toggleLayerVisibility(it) },
+                    onAdd = { flipbook.addLayer() },
+                    onRemove = { flipbook.removeActiveLayer() }
                 )
             }
         }
@@ -418,8 +534,10 @@ fun WorkspaceScreen() {
                 selectedProp = prop
                 selectedEasing = kf.easing
                 if (kf.easing == EasingType.BEZIER) {
-                    bezierX1 = kf.bx1; bezierY1 = kf.by1
-                    bezierX2 = kf.bx2; bezierY2 = kf.by2
+                    bezierX1 = kf.bx1
+                    bezierY1 = kf.by1
+                    bezierX2 = kf.bx2
+                    bezierY2 = kf.by2
                     showBezier = true
                 }
             }
@@ -427,17 +545,24 @@ fun WorkspaceScreen() {
 
         Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF111111))) {
             Row(
-                modifier = Modifier.fillMaxWidth().height(26.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(26.dp)
+                    .background(Color(0xFF1A1A1A))
+                    .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     TimelineMode.values().forEach { mode ->
                         val sel = timelineMode == mode
-                        Box(modifier = Modifier.clip(RoundedCornerShape(3.dp))
-                            .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
-                            .clickable { timeline.setMode(mode) }
-                            .padding(horizontal = 5.dp, vertical = 2.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(if (sel) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
+                                .clickable { timeline.setMode(mode) }
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
                             Text(mode.name.take(3), color = Color.White, fontSize = 8.sp)
                         }
                     }
@@ -445,7 +570,10 @@ fun WorkspaceScreen() {
                 ToolButton(if (isPlaying) "||" else ">") { timeline.togglePlay() }
             }
             Row(
-                modifier = Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (isTabletLandscape) 36.dp else 30.dp)
+                    .padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
@@ -454,14 +582,25 @@ fun WorkspaceScreen() {
                 ToolButton("+F") { flipbook.addFrame() }
                 ToolButton("Dup") { flipbook.duplicateCurrentFrame() }
                 ToolButton("Del") { flipbook.deleteCurrentFrame() }
-                Row(modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     frames.forEachIndexed { index, _ ->
                         val isCurrent = index == currentIndex
-                        Box(modifier = Modifier.width(22.dp).height(18.dp).clip(RoundedCornerShape(3.dp))
-                            .background(if (isCurrent) Color(0xFF7C4DFF) else Color(0xFF2A2A2A))
-                            .clickable { flipbook.setCurrentFrame(index) },
-                            contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .width(if (isTabletLandscape) 28.dp else 22.dp)
+                                .height(if (isTabletLandscape) 22.dp else 18.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(
+                                    if (isCurrent) Color(0xFF7C4DFF) else Color(0xFF2A2A2A)
+                                )
+                                .clickable { flipbook.setCurrentFrame(index) },
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text("${index + 1}", color = Color.White, fontSize = 8.sp)
                         }
                     }
@@ -472,13 +611,25 @@ fun WorkspaceScreen() {
 }
 
 @Composable
-private fun ToolButton(text: String, selected: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    Box(modifier = Modifier.clip(RoundedCornerShape(3.dp))
-        .background(when {
-            selected -> Color(0xFFE53935)
-            enabled -> Color(0xFF333333)
-            else -> Color(0xFF222222)
-        }).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 5.dp, vertical = 3.dp)) {
+private fun ToolButton(
+    text: String,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(
+                when {
+                    selected -> Color(0xFFE53935)
+                    enabled -> Color(0xFF333333)
+                    else -> Color(0xFF222222)
+                }
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 5.dp, vertical = 3.dp)
+    ) {
         Text(text, color = if (enabled) Color.White else Color.Gray, fontSize = 9.sp)
     }
 }
