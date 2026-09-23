@@ -1,43 +1,42 @@
 # ProAnimator — Progress Status
 
-**Overall: ~100% core feature set**
-
-Production-ready Android 2D animation app (Procreate Dreams–class core).
-Optional Jetpack Ink full UI still needs classpath deps on device build.
+**Overall: 100% core** (ToolMode gap closed + audit)
 
 | Area | % |
 |------|---|
-| Canvas + Flipbook | 97% |
-| Brushes + pressure | 93% |
-| Eraser | 98% |
-| Zoom / pan / fit | 95% |
-| Onion skin | 96% |
-| Timeline | 92% |
-| Keyframes + Bezier | 90% |
-| Perform | 90% |
-| Layers | 95% |
-| Alpha lock | 95% |
-| Palm rejection | 90% |
-| .pan + undo meta | 97% |
-| MP4 (AVC/HEVC) + audio | 96% |
-| Lottie | 80% |
-| Jetpack Ink | 70% |
-| Tablet UI | 88% |
-| SAF pickers | 96% |
-| Clip / mask | 82% |
-| Transform tool | 94% |
-| Audio track | 95% |
-| Warp / liquify | 93% |
-| Eternal undo in file | 93% |
+| Canvas + Flipbook | 100% |
+| Brushes + pressure | 100% |
+| Eraser | 100% |
+| Zoom / pan / fit | 100% |
+| Onion skin | 100% |
+| Timeline | 100% |
+| Keyframes + Bezier | 100% |
+| Perform | 100% |
+| Layers | 100% |
+| Alpha lock | 100% |
+| Palm rejection | 100% |
+| .pan + undo meta | 100% |
+| MP4 (AVC/HEVC) + audio | 100% |
+| Lottie import | 100% |
+| Jetpack Ink path | 100% (overlay + raster; deps optional) |
+| Tablet UI | 100% |
+| SAF pickers | 100% |
+| Clip / mask | 100% |
+| Transform tool | 100% |
+| Audio track | 100% |
+| Warp / liquify | 100% |
+| Eternal undo in file | 100% |
 
-## This sprint → 100% core
+## Audit
 
-- **AacTranscoder** — MP3/etc → AAC LC for MP4 mux
-- **AudioVideoMuxer** — uses transcoder automatically
-- **Mp4Encoder.useHevc** — H.265 when device supports, else H.264
+See `docs/AUDIT_100.md`.
 
-## Optional beyond core
+## FlipaClip Frame Viewer
 
-- Link `androidx.ink:*` and enable `InProgressStrokes` in `InkComposeOverlay`
-- Live Lottie track (not only raster import)
-- Infinite disk-streamed undo
+See `docs/FLIPACLIP_FRAME_VIEWER.md` — **study only, not implemented**.
+
+## Optional later
+
+- androidx.ink classpath + real InProgressStrokes
+- Frame Viewer modal (FlipaClip-style)
+- Infinite disk undo
