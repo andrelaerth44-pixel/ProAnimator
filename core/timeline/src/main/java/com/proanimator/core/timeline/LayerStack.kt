@@ -4,17 +4,29 @@ import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Color as AndroidColor
 import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import java.util.UUID
+
+enum class LayerBlendMode {
+    NORMAL,
+    MULTIPLY,
+    SCREEN,
+    OVERLAY,
+    ADD,
+    DARKEN,
+    LIGHTEN
+}
 
 data class DrawLayer(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val bitmap: ImageBitmap,
     var visible: Boolean = true,
-    var opacity: Float = 1f
+    var opacity: Float = 1f,
+    var blendMode: LayerBlendMode = LayerBlendMode.NORMAL
 )
 
 class LayerStack(
@@ -34,7 +46,6 @@ class LayerStack(
     }
 
     fun layerCount(): Int = layers.size
-
     fun layers(): List<DrawLayer> = layers.toList()
 
     fun activeLayer(): DrawLayer {
@@ -76,13 +87,27 @@ class LayerStack(
         }
     }
 
-    fun setLayerMeta(index: Int, name: String, visible: Boolean, opacity: Float) {
+    fun setLayerBlendMode(index: Int, mode: LayerBlendMode) {
+        if (index in layers.indices) {
+            val L = layers[index]
+            layers[index] = L.copy(blendMode = mode)
+        }
+    }
+
+    fun setLayerMeta(
+        index: Int,
+        name: String,
+        visible: Boolean,
+        opacity: Float,
+        blendMode: LayerBlendMode = LayerBlendMode.NORMAL
+    ) {
         if (index !in layers.indices) return
         val L = layers[index]
         layers[index] = L.copy(
             name = name,
             visible = visible,
-            opacity = opacity.coerceIn(0f, 1f)
+            opacity = opacity.coerceIn(0f, 1f),
+            blendMode = blendMode
         )
     }
 
@@ -94,10 +119,24 @@ class LayerStack(
             if (!layer.visible) return@forEach
             val paint = android.graphics.Paint().apply {
                 alpha = (layer.opacity.coerceIn(0f, 1f) * 255).toInt()
+                xfermode = porterDuff(layer.blendMode)
             }
             c.drawBitmap(layer.bitmap.asAndroidBitmap(), 0f, 0f, paint)
         }
         return out.asImageBitmap()
+    }
+
+    private fun porterDuff(mode: LayerBlendMode): PorterDuffXfermode? {
+        val pd = when (mode) {
+            LayerBlendMode.NORMAL -> return null
+            LayerBlendMode.MULTIPLY -> PorterDuff.Mode.MULTIPLY
+            LayerBlendMode.SCREEN -> PorterDuff.Mode.SCREEN
+            LayerBlendMode.OVERLAY -> PorterDuff.Mode.OVERLAY
+            LayerBlendMode.ADD -> PorterDuff.Mode.ADD
+            LayerBlendMode.DARKEN -> PorterDuff.Mode.DARKEN
+            LayerBlendMode.LIGHTEN -> PorterDuff.Mode.LIGHTEN
+        }
+        return PorterDuffXfermode(pd)
     }
 
     fun replaceActiveBitmap(bmp: ImageBitmap) {
@@ -135,7 +174,6 @@ class LayerStack(
         activeLayerIndex = other.activeLayerIndex.coerceIn(0, layers.lastIndex)
     }
 
-    /** Restore full stack from PAN2 load */
     fun replaceAll(from: LayerStack) {
         duplicateFrom(from)
     }

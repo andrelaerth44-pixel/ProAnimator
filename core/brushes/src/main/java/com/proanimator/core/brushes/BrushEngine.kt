@@ -14,12 +14,11 @@ import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.hypot
 
 /**
- * Brush strokes with pressure + optional **Alpha Lock** (SrcIn).
- *
- * Alpha Lock: paint only where the layer already has alpha > 0
- * (Procreate-style — recolor without expanding silhouette).
+ * Variable-width pressure stroke + Alpha Lock.
+ * Draws short segments so width/opacity follow pressure along the path.
  */
 class BrushEngine {
 
@@ -48,40 +47,46 @@ class BrushEngine {
         if (points.size < 2) return
 
         val canvas = Canvas(bitmap)
-        val path = Path().apply {
-            moveTo(points[0].x, points[0].y)
-            for (i in 1 until points.size) {
-                lineTo(points[i].x, points[i].y)
-            }
-        }
-
-        val avgPressure = points.map { it.pressure }.average().toFloat().coerceIn(0.15f, 1f)
-        val width = brush.sizeForPressure(avgPressure) * _sizeMul.value
-        val alpha = brush.opacityForPressure(avgPressure)
-
-        val paint = Paint().apply {
-            strokeWidth = width
-            strokeCap = StrokeCap.Round
-            strokeJoin = StrokeJoin.Round
-            style = PaintingStyle.Stroke
-            isAntiAlias = true
-        }
-
-        if (brush.isEraser) {
-            // Eraser always clears regardless of alpha lock
-            paint.blendMode = BlendMode.Clear
-            paint.color = Color.Transparent
-        } else if (_alphaLock.value) {
-            // SrcIn: keep source color only where destination already has alpha
-            paint.blendMode = BlendMode.SrcIn
-            paint.color = Color(_color.value).copy(alpha = alpha)
-        } else {
-            paint.blendMode = BlendMode.SrcOver
-            paint.color = Color(_color.value).copy(alpha = alpha)
-        }
-
         canvas.nativeCanvas.saveLayer(null, null)
-        canvas.drawPath(path, paint)
+
+        // Segmented stroke → width follows pressure
+        for (i in 1 until points.size) {
+            val a = points[i - 1]
+            val b = points[i]
+            val dist = hypot((b.x - a.x).toDouble(), (b.y - a.y).toDouble()).toFloat()
+            if (dist < 0.3f) continue
+
+            val pressure = ((a.pressure + b.pressure) * 0.5f).coerceIn(0.1f, 1f)
+            val width = brush.sizeForPressure(pressure) * _sizeMul.value
+            val alpha = brush.opacityForPressure(pressure)
+
+            val path = Path().apply {
+                moveTo(a.x, a.y)
+                lineTo(b.x, b.y)
+            }
+
+            val paint = Paint().apply {
+                strokeWidth = width
+                strokeCap = StrokeCap.Round
+                strokeJoin = StrokeJoin.Round
+                style = PaintingStyle.Stroke
+                isAntiAlias = true
+            }
+
+            if (brush.isEraser) {
+                paint.blendMode = BlendMode.Clear
+                paint.color = Color.Transparent
+            } else if (_alphaLock.value) {
+                paint.blendMode = BlendMode.SrcIn
+                paint.color = Color(_color.value).copy(alpha = alpha)
+            } else {
+                paint.blendMode = BlendMode.SrcOver
+                paint.color = Color(_color.value).copy(alpha = alpha)
+            }
+
+            canvas.drawPath(path, paint)
+        }
+
         canvas.nativeCanvas.restore()
     }
 }

@@ -164,6 +164,11 @@ class FlipbookBitmapEngine(
         bumpLayers()
     }
 
+    fun setLayerBlendMode(index: Int, mode: LayerBlendMode) {
+        currentFrame?.layers?.setLayerBlendMode(index, mode)
+        bumpLayers()
+    }
+
     fun loadFrames(bitmaps: List<ImageBitmap>, startIndex: Int = 0) {
         if (bitmaps.isEmpty()) return
         undoStack.clear()
@@ -179,7 +184,6 @@ class FlipbookBitmapEngine(
         bumpLayers()
     }
 
-    /** Restore full multi-layer stacks from PAN2 */
     fun loadLayerStacks(stacks: List<LayerStack>, startIndex: Int = 0) {
         if (stacks.isEmpty()) return
         undoStack.clear()
