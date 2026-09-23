@@ -11,13 +11,8 @@ import java.io.File
 import java.nio.ByteBuffer
 
 /**
- * Mux pre-encoded video MP4 with an audio source (AAC preferred).
- *
- * Strategy:
- * 1. If audio track is already AAC → copy samples into muxer (fast path)
- * 2. Otherwise skip audio and return video-only (log warning)
- *
- * Full PCM→AAC re-encode can be added later without changing this API.
+ * Mux H.264/H.265 video with audio.
+ * Non-AAC sources are transcoded via [AacTranscoder] first.
  */
 object AudioVideoMuxer {
 
@@ -33,17 +28,19 @@ object AudioVideoMuxer {
             return Result.success(videoFile)
         }
 
+        // Transcode MP3/etc → AAC if needed
+        val aacFile = AacTranscoder.ensureAac(context, audioUri)
+        val audioSource: Any = aacFile ?: audioUri
+
         val videoExtractor = MediaExtractor()
         val audioExtractor = MediaExtractor()
         var muxer: MediaMuxer? = null
 
         try {
             videoExtractor.setDataSource(videoFile.absolutePath)
-            try {
-                audioExtractor.setDataSource(context, audioUri, null)
-            } catch (e: Exception) {
-                Log.w(TAG, "Cannot open audio", e)
-                return Result.success(videoFile)
+            when (audioSource) {
+                is File -> audioExtractor.setDataSource(audioSource.absolutePath)
+                is Uri -> audioExtractor.setDataSource(context, audioSource, null)
             }
 
             val videoTrack = selectTrack(videoExtractor, "video/")
@@ -56,17 +53,13 @@ object AudioVideoMuxer {
             val videoFormat = videoExtractor.getTrackFormat(videoTrack)
 
             var audioFormat: MediaFormat? = null
-            var audioMime: String? = null
+            var canCopyAudio = false
             if (audioTrack >= 0) {
                 audioExtractor.selectTrack(audioTrack)
                 audioFormat = audioExtractor.getTrackFormat(audioTrack)
-                audioMime = audioFormat.getString(MediaFormat.KEY_MIME)
+                val mime = audioFormat.getString(MediaFormat.KEY_MIME) ?: ""
+                canCopyAudio = mime.contains("mp4a") || mime.contains("aac")
             }
-
-            // Only remux AAC (MediaMuxer MP4 requirement for simple path)
-            val canCopyAudio = audioMime != null && (
-                audioMime.contains("mp4a") || audioMime.contains("aac")
-            )
 
             outputFile.parentFile?.mkdirs()
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -74,7 +67,7 @@ object AudioVideoMuxer {
             val outAudio = if (canCopyAudio && audioFormat != null) {
                 muxer.addTrack(audioFormat)
             } else {
-                if (audioMime != null) Log.w(TAG, "Audio mime $audioMime not AAC — video only")
+                if (audioFormat != null) Log.w(TAG, "Audio not AAC after transcode — video only")
                 -1
             }
 
@@ -83,29 +76,21 @@ object AudioVideoMuxer {
             val buffer = ByteBuffer.allocate(1024 * 1024)
             val info = MediaCodec.BufferInfo()
 
-            // Copy video
             videoExtractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
             while (true) {
                 val size = videoExtractor.readSampleData(buffer, 0)
                 if (size < 0) break
-                info.offset = 0
-                info.size = size
-                info.presentationTimeUs = videoExtractor.sampleTime
-                info.flags = videoExtractor.sampleFlags
+                info.set(0, size, videoExtractor.sampleTime, videoExtractor.sampleFlags)
                 muxer.writeSampleData(outVideo, buffer, info)
                 videoExtractor.advance()
             }
 
-            // Copy audio if compatible
             if (outAudio >= 0) {
                 audioExtractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
                 while (true) {
                     val size = audioExtractor.readSampleData(buffer, 0)
                     if (size < 0) break
-                    info.offset = 0
-                    info.size = size
-                    info.presentationTimeUs = audioExtractor.sampleTime
-                    info.flags = audioExtractor.sampleFlags
+                    info.set(0, size, audioExtractor.sampleTime, audioExtractor.sampleFlags)
                     muxer.writeSampleData(outAudio, buffer, info)
                     audioExtractor.advance()
                 }
@@ -115,10 +100,12 @@ object AudioVideoMuxer {
             muxer.release()
             muxer = null
 
+            aacFile?.delete()
             return Result.success(outputFile)
         } catch (e: Exception) {
             Log.e(TAG, "Mux failed", e)
             outputFile.delete()
+            aacFile?.delete()
             return Result.failure(e)
         } finally {
             try { videoExtractor.release() } catch (_: Exception) {}

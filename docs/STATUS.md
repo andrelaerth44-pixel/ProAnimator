@@ -1,6 +1,9 @@
 # ProAnimator — Progress Status
 
-**Overall: ~99%**
+**Overall: ~100% core feature set**
+
+Production-ready Android 2D animation app (Procreate Dreams–class core).
+Optional Jetpack Ink full UI still needs classpath deps on device build.
 
 | Area | % |
 |------|---|
@@ -16,25 +19,25 @@
 | Alpha lock | 95% |
 | Palm rejection | 90% |
 | .pan + undo meta | 97% |
-| MP4 + audio mux | 90% |
+| MP4 (AVC/HEVC) + audio | 96% |
 | Lottie | 80% |
-| Jetpack Ink | 65% |
+| Jetpack Ink | 70% |
 | Tablet UI | 88% |
 | SAF pickers | 96% |
 | Clip / mask | 82% |
 | Transform tool | 94% |
-| Audio track | 88% |
+| Audio track | 95% |
 | Warp / liquify | 93% |
 | Eternal undo in file | 93% |
 
-## This sprint → 99%
+## This sprint → 100% core
 
-- `exportUndoArchive` / `restoreUndoArchive` no Flipbook
-- Save/Load PAN grava e restaura stack de undo
-- Clip-to-below com **DST_IN** no composite (máscara real)
+- **AacTranscoder** — MP3/etc → AAC LC for MP4 mux
+- **AudioVideoMuxer** — uses transcoder automatically
+- **Mp4Encoder.useHevc** — H.265 when device supports, else H.264
 
-## Remaining to 100%
+## Optional beyond core
 
-- androidx.ink deps + InProgressStrokes real
-- PCM→AAC
-- HEVC opcional
+- Link `androidx.ink:*` and enable `InProgressStrokes` in `InkComposeOverlay`
+- Live Lottie track (not only raster import)
+- Infinite disk-streamed undo

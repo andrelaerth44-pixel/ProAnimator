@@ -1,18 +1,9 @@
 # Optional Jetpack Ink
 
-## Research summary
-
-- **androidx.ink 1.0.0** stable / 1.1.0-alpha
-- Modules: authoring-compose (`InProgressStrokes`), brush-compose (`StockBrushes`), geometry, rendering, storage
-- Best for low-latency stylus mesh strokes
-- ProAnimator keeps **ImageBitmap Flipbook** as source of truth for export/MP4/.pan
-
-## Enable
-
-In `app/build.gradle.kts`:
+## Enable (app/build.gradle.kts)
 
 ```kotlin
-val ink = "1.0.0"
+val ink = "1.1.0-alpha08" // or latest from developer.android.com/jetpack/androidx/releases/ink
 implementation("androidx.ink:ink-nativeloader:$ink")
 implementation("androidx.ink:ink-strokes:$ink")
 implementation("androidx.ink:ink-brush:$ink")
@@ -22,27 +13,31 @@ implementation("androidx.ink:ink-rendering:$ink")
 implementation("androidx.ink:ink-geometry-compose:$ink")
 ```
 
-Then:
-
 ```kotlin
 InkFeatureFlags.enabled = true
 ```
 
-`InkBridge.isAvailable` uses reflection so the project **builds without** these deps.
+## Compose API
 
-## Integration path
+```kotlin
+InProgressStrokes(
+    defaultBrush = brush,
+    pointerEventToWorldTransform = inverseViewportMatrix,
+    onStrokesFinished = { strokes ->
+        // rasterize → applyInkStrokeToFlipbook / InkRasterizer
+    }
+)
+```
 
-1. Overlay `InkComposeOverlay` / `InProgressStrokes` on the canvas when `canUse`
-2. `onStrokesFinished` → `InkRasterizer.rasterize` / `applyInkStrokeToFlipbook`
-3. Keep eraser / onion / export on bitmap path
+See: https://developer.android.com/develop/ui/compose/touch-input/stylus-input/ink-api-draw-stroke
 
-## Code already in repo
+## Already in repo
 
 | File | Role |
 |------|------|
-| `InkBridge` / `InkFeatureFlags` | Optional detection |
-| `InkRasterizer` | Pressure segment raster onto ImageBitmap |
-| `InkComposeOverlay` | Host slot for InProgressStrokes |
-| `applyInkStrokeToFlipbook` | Finish → active layer |
+| InkBridge / InkFeatureFlags | Optional detection |
+| InkRasterizer | Pressure raster |
+| InkComposeOverlay | Host slot |
+| applyInkStrokeToFlipbook | Finish → layer |
 
-Until deps are present, **BrushEngine + pressure** is the production path.
+Without deps, BrushEngine + pressure is the production path.
