@@ -11,6 +11,8 @@ import com.proanimator.core.brushes.BrushEngine
 import com.proanimator.core.brushes.BrushLibrary
 import com.proanimator.core.brushes.BrushPreset
 import com.proanimator.core.engine.ToolMode
+import com.proanimator.core.engine.TransformBake
+import com.proanimator.core.engine.WarpEngine
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +33,7 @@ class FlipbookBitmapEngine(
     }
 
     val brushEngine = BrushEngine()
+    val warpEngine = WarpEngine(cols = 32, rows = 32)
 
     private val _frames = MutableStateFlow(
         listOf(Frame(index = 0, layers = LayerStack(width, height)))
@@ -53,11 +56,15 @@ class FlipbookBitmapEngine(
 
     private val _onionEnabled = MutableStateFlow(true)
     val onionEnabled: StateFlow<Boolean> = _onionEnabled.asStateFlow()
-
     private val _onionBefore = MutableStateFlow(2)
     val onionBefore: StateFlow<Int> = _onionBefore.asStateFlow()
     private val _onionAfter = MutableStateFlow(1)
     val onionAfter: StateFlow<Int> = _onionAfter.asStateFlow()
+
+    private val _warpMode = MutableStateFlow(false)
+    val warpMode: StateFlow<Boolean> = _warpMode.asStateFlow()
+
+    private var warpVertSnapshot: FloatArray? = null
 
     private val undoStack = mutableListOf<Pair<Int, Bitmap>>()
     private val redoStack = mutableListOf<Pair<Int, Bitmap>>()
@@ -93,10 +100,69 @@ class FlipbookBitmapEngine(
     fun setOnionBefore(n: Int) { _onionBefore.value = n.coerceIn(0, 5) }
     fun setOnionAfter(n: Int) { _onionAfter.value = n.coerceIn(0, 5) }
 
+    fun setWarpMode(enabled: Boolean) {
+        if (enabled) {
+            val bmp = currentFrame?.layers?.activeLayer()?.bitmap ?: return
+            warpEngine.ensureMesh(bmp.width, bmp.height)
+            warpEngine.resetMesh()
+            warpVertSnapshot = warpEngine.snapshotVerts()
+            _warpMode.value = true
+        } else {
+            _warpMode.value = false
+        }
+    }
+
+    fun toggleWarpMode() = setWarpMode(!_warpMode.value)
+
+    /** Live liquify stroke while warp mode on */
+    fun warpPush(cx: Float, cy: Float, dx: Float, dy: Float, radius: Float = 100f) {
+        if (!_warpMode.value) return
+        warpEngine.push(cx, cy, dx, dy, radius, strength = 0.9f)
+    }
+
+    fun warpPinch(cx: Float, cy: Float, amount: Float) {
+        if (!_warpMode.value) return
+        warpEngine.pinchBloat(cx, cy, amount)
+    }
+
+    /** Bake mesh into active layer bitmap */
+    fun applyWarp() {
+        if (!_warpMode.value) return
+        val frame = currentFrame ?: return
+        val active = frame.layers.activeLayer()
+        pushUndo(frame.index, active.bitmap)
+        val warped = warpEngine.apply(active.bitmap)
+        frame.layers.replaceActiveBitmap(warped)
+        warpEngine.resetMesh()
+        _warpMode.value = false
+        redoStack.clear()
+        updateUndoRedo()
+        bumpLayers()
+    }
+
+    fun cancelWarp() {
+        warpVertSnapshot?.let { warpEngine.restoreVerts(it) }
+        warpEngine.resetMesh()
+        _warpMode.value = false
+    }
+
+    /** Bake transform into active layer */
+    fun bakeTransform(tx: Float, ty: Float, scale: Float, rotation: Float) {
+        val frame = currentFrame ?: return
+        val active = frame.layers.activeLayer()
+        pushUndo(frame.index, active.bitmap)
+        val baked = TransformBake.bake(active.bitmap, tx, ty, scale, rotation)
+        frame.layers.replaceActiveBitmap(baked)
+        redoStack.clear()
+        updateUndoRedo()
+        bumpLayers()
+    }
+
     fun setCurrentFrame(index: Int) {
         val max = (_frames.value.size - 1).coerceAtLeast(0)
         _currentIndex.value = index.coerceIn(0, max)
         _currentPath.value = emptyList()
+        if (_warpMode.value) cancelWarp()
         bumpLayers()
     }
 
@@ -261,4 +327,11 @@ class FlipbookBitmapEngine(
     }
 
     fun getAllBitmaps(): List<ImageBitmap> = _frames.value.map { it.bitmap }
+
+    /** Preview warped active layer without baking (for UI) */
+    fun previewWarp(): ImageBitmap? {
+        if (!_warpMode.value) return null
+        val active = currentFrame?.layers?.activeLayer() ?: return null
+        return warpEngine.apply(active.bitmap)
+    }
 }
