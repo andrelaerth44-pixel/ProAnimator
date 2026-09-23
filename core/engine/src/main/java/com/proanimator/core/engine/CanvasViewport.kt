@@ -1,15 +1,10 @@
 package com.proanimator.core.engine
 
 import androidx.compose.ui.geometry.Offset
-import kotlin.math.max
 import kotlin.math.min
 
 /**
  * Viewport for zoom/pan over the drawing surface.
- * Screen coords → canvas (bitmap) coords conversion.
- *
- * Research: Compose transformable + detectTransformGestures
- * (centroid-aware zoom so pinch zooms toward fingers).
  */
 class CanvasViewport(
     val canvasWidth: Float,
@@ -20,13 +15,12 @@ class CanvasViewport(
     var offset: Offset = Offset.Zero
         private set
 
-    val minScale = 0.2f
+    val minScale = 0.05f
     val maxScale = 8f
 
     fun applyZoomPan(centroid: Offset, pan: Offset, zoom: Float) {
         val oldScale = scale
         val newScale = (scale * zoom).coerceIn(minScale, maxScale)
-        // Zoom toward centroid
         offset = (offset + centroid / oldScale) - (centroid / newScale + pan / oldScale)
         scale = newScale
     }
@@ -36,12 +30,29 @@ class CanvasViewport(
         offset = Offset.Zero
     }
 
-    /** Screen position → position on the ImageBitmap */
-    fun screenToCanvas(screen: Offset): Offset {
-        return (screen / scale) - offset
+    /**
+     * Fit entire canvas into [viewWidth] x [viewHeight] with letterboxing padding.
+     * Call after load / on size change.
+     */
+    fun fitToScreen(viewWidth: Float, viewHeight: Float, padding: Float = 24f) {
+        if (viewWidth <= 0f || viewHeight <= 0f) return
+        val availW = (viewWidth - padding * 2).coerceAtLeast(1f)
+        val availH = (viewHeight - padding * 2).coerceAtLeast(1f)
+        val sx = availW / canvasWidth
+        val sy = availH / canvasHeight
+        scale = min(sx, sy).coerceIn(minScale, maxScale)
+        // Center canvas in view (in canvas-space offset used by withTransform)
+        // screen = (canvas + offset) * scale  → center:
+        // view/2 = (canvasCenter + offset) * scale
+        val cx = canvasWidth / 2f
+        val cy = canvasHeight / 2f
+        offset = Offset(
+            viewWidth / (2f * scale) - cx,
+            viewHeight / (2f * scale) - cy
+        )
     }
 
-    fun canvasToScreen(canvas: Offset): Offset {
-        return (canvas + offset) * scale
-    }
+    fun screenToCanvas(screen: Offset): Offset = (screen / scale) - offset
+
+    fun canvasToScreen(canvas: Offset): Offset = (canvas + offset) * scale
 }

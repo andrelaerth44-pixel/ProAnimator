@@ -16,7 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Applies BrushPreset strokes onto ImageBitmap with pressure-aware width/opacity.
+ * Brush strokes with pressure + optional **Alpha Lock** (SrcIn).
+ *
+ * Alpha Lock: paint only where the layer already has alpha > 0
+ * (Procreate-style — recolor without expanding silhouette).
  */
 class BrushEngine {
 
@@ -29,9 +32,14 @@ class BrushEngine {
     private val _sizeMul = MutableStateFlow(1f)
     val sizeMul: StateFlow<Float> = _sizeMul.asStateFlow()
 
+    private val _alphaLock = MutableStateFlow(false)
+    val alphaLock: StateFlow<Boolean> = _alphaLock.asStateFlow()
+
     fun setBrush(preset: BrushPreset) { _activeBrush.value = preset }
     fun setColor(c: Long) { _color.value = c }
     fun setSizeMultiplier(m: Float) { _sizeMul.value = m.coerceIn(0.25f, 4f) }
+    fun setAlphaLock(enabled: Boolean) { _alphaLock.value = enabled }
+    fun toggleAlphaLock() { _alphaLock.value = !_alphaLock.value }
 
     fun drawStroke(bitmap: ImageBitmap, rawPoints: List<StrokePoint>) {
         if (rawPoints.size < 2) return
@@ -60,8 +68,13 @@ class BrushEngine {
         }
 
         if (brush.isEraser) {
+            // Eraser always clears regardless of alpha lock
             paint.blendMode = BlendMode.Clear
             paint.color = Color.Transparent
+        } else if (_alphaLock.value) {
+            // SrcIn: keep source color only where destination already has alpha
+            paint.blendMode = BlendMode.SrcIn
+            paint.color = Color(_color.value).copy(alpha = alpha)
         } else {
             paint.blendMode = BlendMode.SrcOver
             paint.color = Color(_color.value).copy(alpha = alpha)

@@ -4,7 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -22,13 +26,14 @@ fun LayerPanel(
     activeIndex: Int,
     onSelect: (Int) -> Unit,
     onToggleVisible: (Int) -> Unit,
+    onOpacity: (Int, Float) -> Unit,
     onAdd: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
-            .width(120.dp)
+            .width(132.dp)
             .fillMaxHeight()
             .background(Color(0xFF1A1A1A))
             .padding(6.dp)
@@ -40,33 +45,77 @@ fun LayerPanel(
             SmallBtn("−") { onRemove() }
         }
         Spacer(Modifier.height(6.dp))
-        layers.asReversed().forEachIndexed { rev, _ ->
-            val index = layers.lastIndex - rev
-            val layer = layers[index]
-            val sel = index == activeIndex
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(if (sel) Color(0xFF4A148C) else Color(0xFF2A2A2A))
-                    .border(1.dp, if (sel) Color(0xFFBB86FC) else Color.Transparent, RoundedCornerShape(4.dp))
-                    .clickable { onSelect(index) }
-                    .padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    layer.name.take(8),
-                    color = if (layer.visible) Color.White else Color.Gray,
-                    fontSize = 10.sp
+
+        // Opacity of active layer
+        val active = layers.getOrNull(activeIndex)
+        if (active != null) {
+            Text(
+                "Opacity ${(active.opacity * 100).toInt()}%",
+                color = Color(0xFFBB86FC),
+                fontSize = 9.sp
+            )
+            Slider(
+                value = active.opacity,
+                onValueChange = { onOpacity(activeIndex, it) },
+                valueRange = 0f..1f,
+                modifier = Modifier.fillMaxWidth().height(28.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = Color(0xFFBB86FC),
+                    activeTrackColor = Color(0xFF7C4DFF),
+                    inactiveTrackColor = Color(0xFF333333)
                 )
-                Text(
-                    if (layer.visible) "👁" else "—",
-                    fontSize = 10.sp,
-                    modifier = Modifier.clickable { onToggleVisible(index) }
-                )
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .verticalScroll(rememberScrollState())
+        ) {
+            layers.asReversed().forEachIndexed { rev, _ ->
+                val index = layers.lastIndex - rev
+                val layer = layers[index]
+                val sel = index == activeIndex
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (sel) Color(0xFF4A148C) else Color(0xFF2A2A2A))
+                        .border(
+                            1.dp,
+                            if (sel) Color(0xFFBB86FC) else Color.Transparent,
+                            RoundedCornerShape(4.dp)
+                        )
+                        .clickable { onSelect(index) }
+                        .padding(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            layer.name.take(8),
+                            color = if (layer.visible) Color.White else Color.Gray,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            if (layer.visible) "👁" else "—",
+                            fontSize = 10.sp,
+                            modifier = Modifier.clickable { onToggleVisible(index) }
+                        )
+                    }
+                    if (layer.opacity < 0.99f) {
+                        Text(
+                            "${(layer.opacity * 100).toInt()}%",
+                            color = Color.Gray,
+                            fontSize = 8.sp
+                        )
+                    }
+                }
+                Spacer(Modifier.height(3.dp))
             }
-            Spacer(Modifier.height(3.dp))
         }
     }
 }
