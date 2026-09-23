@@ -5,8 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Perform mode — record live transforms while scrubbing/playing.
- * Properties: POS_X, POS_Y, SCALE, ROTATION, OPACITY
+ * Perform mode — record live transforms; fully serializable via ProjectSerializer meta.
  */
 class PerformEngine {
 
@@ -29,16 +28,26 @@ class PerformEngine {
     val rotation: StateFlow<Float> = _rotation.asStateFlow()
     val opacity: StateFlow<Float> = _opacity.asStateFlow()
 
+    /** Bump to force UI recomposition after load */
+    private val _revision = MutableStateFlow(0)
+    val revision: StateFlow<Int> = _revision.asStateFlow()
+
     fun startRecording() { _isRecording.value = true }
     fun stopRecording() { _isRecording.value = false }
     fun toggleRecording() { _isRecording.value = !_isRecording.value }
 
-    fun recordAtFrame(frame: Int, property: AnimProperty, value: Float, easing: EasingType = EasingType.EASE_IN_OUT) {
+    fun recordAtFrame(
+        frame: Int,
+        property: AnimProperty,
+        value: Float,
+        easing: EasingType = EasingType.EASE_IN_OUT
+    ) {
         if (!_isRecording.value) return
         val track = tracks[property] ?: return
         track.keyframes.removeAll { it.frame == frame }
         track.keyframes.add(Keyframe(frame, value, easing))
         applyLive(property, value)
+        _revision.value++
     }
 
     fun recordDrag(frame: Int, dx: Float, dy: Float) {
@@ -49,10 +58,20 @@ class PerformEngine {
         recordAtFrame(frame, AnimProperty.POS_Y, ny)
     }
 
-    fun addKeyframe(property: AnimProperty, frame: Int, value: Float, easing: EasingType = EasingType.BEZIER) {
+    fun addKeyframe(
+        property: AnimProperty,
+        frame: Int,
+        value: Float,
+        easing: EasingType = EasingType.BEZIER,
+        bx1: Float = 0.42f,
+        by1: Float = 0f,
+        bx2: Float = 0.58f,
+        by2: Float = 1f
+    ) {
         val track = tracks[property] ?: return
         track.keyframes.removeAll { it.frame == frame }
-        track.keyframes.add(Keyframe(frame, value, easing))
+        track.keyframes.add(Keyframe(frame, value, easing, bx1, by1, bx2, by2))
+        _revision.value++
     }
 
     fun evaluate(frame: Float) {
@@ -82,5 +101,8 @@ class PerformEngine {
         _scale.value = 1f
         _rotation.value = 0f
         _opacity.value = 1f
+        _revision.value++
     }
+
+    fun keyframeCount(): Int = tracks.values.sumOf { it.keyframes.size }
 }

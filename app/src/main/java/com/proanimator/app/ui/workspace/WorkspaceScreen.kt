@@ -32,7 +32,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.proanimator.core.brushes.BrushLibrary
-import com.proanimator.core.engine.ToolMode
 import com.proanimator.core.export.ExportEngine
 import com.proanimator.core.export.ProjectSerializer
 import com.proanimator.core.timeline.AnimProperty
@@ -45,7 +44,6 @@ import com.proanimator.core.timeline.TimelineMode
 import com.proanimator.domain.model.StrokePoint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 @Composable
 fun WorkspaceScreen() {
@@ -76,6 +74,7 @@ fun WorkspaceScreen() {
     val perfScale by perform.scale.collectAsState()
     val perfRot by perform.rotation.collectAsState()
     val perfOpacity by perform.opacity.collectAsState()
+    val performRevision by perform.revision.collectAsState()
 
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var showProjects by remember { mutableStateOf(false) }
@@ -113,19 +112,62 @@ fun WorkspaceScreen() {
 
     fun addKf(prop: AnimProperty, frame: Int) {
         val value = currentValueFor(prop)
-        val kf = if (selectedEasing == EasingType.BEZIER) {
-            Keyframe(frame, value, EasingType.BEZIER, bezierX1, bezierY1, bezierX2, bezierY2)
-        } else {
-            Keyframe(frame, value, selectedEasing)
-        }
-        perform.getTrack(prop).keyframes.removeAll { it.frame == frame }
-        perform.getTrack(prop).keyframes.add(kf)
+        perform.addKeyframe(
+            prop, frame, value, selectedEasing,
+            bezierX1, bezierY1, bezierX2, bezierY2
+        )
         statusMessage = "KF ${prop.name} @ F$frame"
+    }
+
+    fun doSave() {
+        scope.launch {
+            statusMessage = "Saving…"
+            val meta = ProjectSerializer.buildMeta(
+                brushId = activeBrush.id,
+                onionEnabled = onionEnabled,
+                timelineMode = timelineMode.name,
+                perform = perform
+            )
+            val data = ProjectSerializer.ProjectData(
+                width = flipbook.width,
+                height = flipbook.height,
+                fps = timeline.fps.value,
+                currentFrameIndex = currentIndex,
+                frames = flipbook.getAllBitmaps(),
+                meta = meta
+            )
+            serializer.save(data).onSuccess {
+                statusMessage = "Saved ${it.name} (${perform.keyframeCount()} KFs)"
+                projectList = serializer.listProjects()
+            }.onFailure {
+                statusMessage = "Save failed: ${it.message?.take(40)}"
+            }
+        }
+    }
+
+    fun doLoad(file: java.io.File) {
+        scope.launch {
+            statusMessage = "Loading…"
+            serializer.load(file).onSuccess { data ->
+                flipbook.loadFrames(data.frames, data.currentFrameIndex)
+                val extras = ProjectSerializer.applyMeta(data.meta, perform)
+                flipbook.setOnionEnabled(extras.onionEnabled)
+                BrushLibrary.ALL.find { it.id == extras.brushId }?.let { flipbook.setBrush(it) }
+                try {
+                    timeline.setMode(TimelineMode.valueOf(extras.timelineMode))
+                } catch (_: Exception) {}
+                perform.evaluate(data.currentFrameIndex.toFloat())
+                statusMessage =
+                    "Loaded ${data.frames.size} frames, ${perform.keyframeCount()} KFs"
+                showProjects = false
+            }.onFailure {
+                statusMessage = "Load failed: ${it.message?.take(40)}"
+            }
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // Top bar
         Row(
             modifier = Modifier.fillMaxWidth().height(36.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -135,17 +177,7 @@ fun WorkspaceScreen() {
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 ToolButton("Undo", enabled = canUndo) { flipbook.undo() }
                 ToolButton("Redo", enabled = canRedo) { flipbook.redo() }
-                ToolButton("Save") {
-                    scope.launch {
-                        val meta = JSONObject().put("brush", activeBrush.id)
-                        serializer.save(
-                            ProjectSerializer.ProjectData(
-                                flipbook.width, flipbook.height, timeline.fps.value,
-                                currentIndex, flipbook.getAllBitmaps(), meta
-                            )
-                        ).onSuccess { statusMessage = "Saved" }
-                    }
-                }
+                ToolButton("Save") { doSave() }
                 ToolButton("Load") {
                     projectList = serializer.listProjects()
                     showProjects = !showProjects
@@ -154,7 +186,8 @@ fun WorkspaceScreen() {
                     scope.launch {
                         exportEngine.exportMp4(
                             flipbook.getAllBitmaps(), flipbook.width, flipbook.height, timeline.fps.value
-                        ).onSuccess { statusMessage = "MP4 ok" }
+                        ).onSuccess { statusMessage = "MP4: ${it.name}" }
+                            .onFailure { statusMessage = "MP4 fail" }
                     }
                 }
                 ToolButton("Bezier", selected = showBezier) { showBezier = !showBezier }
@@ -167,17 +200,18 @@ fun WorkspaceScreen() {
 
         if (showProjects) {
             Column(Modifier = Modifier.fillMaxWidth().background(Color(0xFF1E1E1E)).padding(8.dp)) {
-                projectList.take(6).forEach { f ->
-                    Text(f.name, color = Color(0xFF03DAC6), fontSize = 11.sp,
-                        modifier = Modifier.clickable {
-                            scope.launch {
-                                serializer.load(f).onSuccess {
-                                    flipbook.loadFrames(it.frames, it.currentFrameIndex)
-                                    statusMessage = "Loaded"
-                                    showProjects = false
-                                }
-                            }
-                        }.padding(4.dp))
+                Text("Projects (.pan)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                if (projectList.isEmpty()) {
+                    Text("None yet — Save first", color = Color.Gray, fontSize = 10.sp)
+                }
+                projectList.take(8).forEach { f ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { doLoad(f) }.padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(f.name, color = Color(0xFF03DAC6), fontSize = 11.sp)
+                        Text("${f.length() / 1024}KB", color = Color.Gray, fontSize = 9.sp)
+                    }
                 }
                 Text("Close", color = Color.Gray, fontSize = 10.sp, modifier = Modifier.clickable { showProjects = false })
             }
@@ -186,10 +220,9 @@ fun WorkspaceScreen() {
         statusMessage?.let {
             Text(it, color = Color(0xFF03DAC6), fontSize = 10.sp,
                 modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp, vertical = 2.dp))
-            LaunchedEffect(it) { delay(2000); statusMessage = null }
+            LaunchedEffect(it) { delay(2500); statusMessage = null }
         }
 
-        // Brushes
         Row(
             modifier = Modifier.fillMaxWidth().background(Color(0xFF222222)).padding(horizontal = 6.dp, vertical = 3.dp)
                 .horizontalScroll(rememberScrollState()),
@@ -222,7 +255,6 @@ fun WorkspaceScreen() {
             )
         }
 
-        // Easing quick picker
         Row(
             modifier = Modifier.fillMaxWidth().background(Color(0xFF1C1C1C)).padding(horizontal = 6.dp, vertical = 2.dp)
                 .horizontalScroll(rememberScrollState()),
@@ -242,7 +274,6 @@ fun WorkspaceScreen() {
         }
 
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            // Canvas
             Box(modifier = Modifier.weight(1f).fillMaxHeight().background(Color(0xFF2C2C2C))) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cell = 16f
@@ -310,6 +341,8 @@ fun WorkspaceScreen() {
                     Text("F${currentIndex + 1}/${frames.size}", color = Color.White.copy(0.85f), fontSize = 11.sp)
                     Text(activeBrush.name, color = Color.White.copy(0.55f), fontSize = 9.sp)
                     if (isRecording) Text("PERFORM", color = Color.Red, fontSize = 9.sp)
+                    // force observe revision
+                    Text("${performRevision} KFs loaded", color = Color.Transparent, fontSize = 1.sp)
                 }
                 Text(
                     if (onionEnabled) "Onion" else "Off",
@@ -320,7 +353,6 @@ fun WorkspaceScreen() {
                 )
             }
 
-            // Bezier panel (side)
             if (showBezier) {
                 BezierEditor(
                     x1 = bezierX1, y1 = bezierY1, x2 = bezierX2, y2 = bezierY2,
@@ -333,7 +365,6 @@ fun WorkspaceScreen() {
             }
         }
 
-        // Keyframe track
         KeyframeTrackStrip(
             perform = perform,
             currentFrame = currentIndex,
@@ -353,7 +384,6 @@ fun WorkspaceScreen() {
             }
         )
 
-        // Bottom transport
         Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF111111))) {
             Row(
                 modifier = Modifier.fillMaxWidth().height(26.dp).background(Color(0xFF1A1A1A)).padding(horizontal = 6.dp),

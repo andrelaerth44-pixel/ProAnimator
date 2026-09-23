@@ -6,6 +6,10 @@ import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.proanimator.core.timeline.AnimProperty
+import com.proanimator.core.timeline.EasingType
+import com.proanimator.core.timeline.Keyframe
+import com.proanimator.core.timeline.PerformEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -20,32 +24,109 @@ import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 /**
- * ProjectSerializer — Phase 3 Save/Load
+ * ProjectSerializer — full .pan Save/Load
  *
- * Format: .pan (ProAnimator Project)
- * Structure (binary + gzip):
- *   MAGIC "PAN1" (4 bytes)
- *   version (int)
- *   width (int)
- *   height (int)
- *   fps (float)
- *   currentFrameIndex (int)
- *   frameCount (int)
- *   for each frame:
- *     pngLength (int)
- *     pngBytes (pngLength bytes)  — lossless PNG of the frame bitmap
- *   metaJsonLength (int)
- *   metaJson (UTF-8) — extra timeline / keyframe metadata
+ * Binary + GZIP:
+ *   MAGIC "PAN1"
+ *   version, width, height, fps, currentFrame, frameCount
+ *   frames as PNG
+ *   meta JSON (UTF-8) including:
+ *     brush, onion, timelineMode
+ *     keyframe tracks (all AnimProperty)
  *
- * This keeps bitmaps lossless and metadata flexible.
+ * Meta schema (version 2 content inside PAN1 container):
+ * {
+ *   "schema": 2,
+ *   "brushId": "pen",
+ *   "onionEnabled": true,
+ *   "timelineMode": "COMPOSE",
+ *   "tracks": {
+ *     "POS_X": [ { "frame": 0, "value": 0, "easing": "BEZIER", "bx1": 0.42, ... } ],
+ *     ...
+ *   }
+ * }
  */
 class ProjectSerializer(private val context: Context) {
 
     companion object {
         private const val MAGIC = "PAN1"
         private const val VERSION = 1
+        private const val META_SCHEMA = 2
         private const val EXT = ".pan"
+
+        fun buildMeta(
+            brushId: String,
+            onionEnabled: Boolean,
+            timelineMode: String,
+            perform: PerformEngine
+        ): JSONObject {
+            val tracksJson = JSONObject()
+            AnimProperty.entries.forEach { prop ->
+                val arr = JSONArray()
+                perform.getTrack(prop).keyframes.sortedBy { it.frame }.forEach { kf ->
+                    arr.put(JSONObject().apply {
+                        put("frame", kf.frame)
+                        put("value", kf.value.toDouble())
+                        put("easing", kf.easing.name)
+                        put("bx1", kf.bx1.toDouble())
+                        put("by1", kf.by1.toDouble())
+                        put("bx2", kf.bx2.toDouble())
+                        put("by2", kf.by2.toDouble())
+                    })
+                }
+                tracksJson.put(prop.name, arr)
+            }
+            return JSONObject().apply {
+                put("schema", META_SCHEMA)
+                put("brushId", brushId)
+                put("onionEnabled", onionEnabled)
+                put("timelineMode", timelineMode)
+                put("tracks", tracksJson)
+            }
+        }
+
+        fun applyMeta(meta: JSONObject, perform: PerformEngine): MetaExtras {
+            perform.clearAll()
+            val tracks = meta.optJSONObject("tracks")
+            if (tracks != null) {
+                AnimProperty.entries.forEach { prop ->
+                    val arr = tracks.optJSONArray(prop.name) ?: return@forEach
+                    val list = perform.getTrack(prop).keyframes
+                    list.clear()
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        val easing = try {
+                            EasingType.valueOf(o.optString("easing", "EASE_IN_OUT"))
+                        } catch (_: Exception) {
+                            EasingType.EASE_IN_OUT
+                        }
+                        list.add(
+                            Keyframe(
+                                frame = o.getInt("frame"),
+                                value = o.getDouble("value").toFloat(),
+                                easing = easing,
+                                bx1 = o.optDouble("bx1", 0.42).toFloat(),
+                                by1 = o.optDouble("by1", 0.0).toFloat(),
+                                bx2 = o.optDouble("bx2", 0.58).toFloat(),
+                                by2 = o.optDouble("by2", 1.0).toFloat()
+                            )
+                        )
+                    }
+                }
+            }
+            return MetaExtras(
+                brushId = meta.optString("brushId", "pen"),
+                onionEnabled = meta.optBoolean("onionEnabled", true),
+                timelineMode = meta.optString("timelineMode", "COMPOSE")
+            )
+        }
     }
+
+    data class MetaExtras(
+        val brushId: String,
+        val onionEnabled: Boolean,
+        val timelineMode: String
+    )
 
     data class ProjectData(
         val width: Int,
@@ -68,16 +149,19 @@ class ProjectSerializer(private val context: Context) {
             FileOutputStream(file).use { fos ->
                 GZIPOutputStream(fos).use { gzos ->
                     DataOutputStream(gzos).use { out ->
-                        // Header
                         out.writeBytes(MAGIC)
                         out.writeInt(VERSION)
                         out.writeInt(data.width)
                         out.writeInt(data.height)
                         out.writeFloat(data.fps)
-                        out.writeInt(data.currentFrameIndex.coerceIn(0, data.frames.size - 1))
+                        out.writeInt(
+                            data.currentFrameIndex.coerceIn(
+                                0,
+                                (data.frames.size - 1).coerceAtLeast(0)
+                            )
+                        )
                         out.writeInt(data.frames.size)
 
-                        // Frames as PNG
                         data.frames.forEach { imageBitmap ->
                             val bmp = imageBitmap.asAndroidBitmap()
                             val baos = ByteArrayOutputStream()
@@ -87,7 +171,6 @@ class ProjectSerializer(private val context: Context) {
                             out.write(png)
                         }
 
-                        // Metadata JSON
                         val metaBytes = data.meta.toString().toByteArray(Charsets.UTF_8)
                         out.writeInt(metaBytes.size)
                         out.write(metaBytes)
@@ -105,7 +188,6 @@ class ProjectSerializer(private val context: Context) {
             FileInputStream(file).use { fis ->
                 GZIPInputStream(fis).use { gzis ->
                     DataInputStream(gzis).use { input ->
-                        // Magic
                         val magicBytes = ByteArray(4)
                         input.readFully(magicBytes)
                         val magic = String(magicBytes, Charsets.US_ASCII)
@@ -150,7 +232,10 @@ class ProjectSerializer(private val context: Context) {
                                 width = width,
                                 height = height,
                                 fps = fps,
-                                currentFrameIndex = currentFrameIndex.coerceIn(0, frames.size - 1),
+                                currentFrameIndex = currentFrameIndex.coerceIn(
+                                    0,
+                                    (frames.size - 1).coerceAtLeast(0)
+                                ),
                                 frames = frames,
                                 meta = meta
                             )
@@ -172,6 +257,10 @@ class ProjectSerializer(private val context: Context) {
     }
 
     fun deleteProject(file: File): Boolean {
-        return try { file.delete() } catch (_: Exception) { false }
+        return try {
+            file.delete()
+        } catch (_: Exception) {
+            false
+        }
     }
 }
