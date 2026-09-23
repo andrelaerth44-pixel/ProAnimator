@@ -33,10 +33,10 @@ See `docs/AUDIT_100.md`.
 
 ## FlipaClip Frame Viewer
 
-See `docs/FLIPACLIP_FRAME_VIEWER.md` — **study only, not implemented**.
+See `docs/FLIPACLIP_FRAME_VIEWER.md` — **implemented** as modal `FrameViewerSheet` (grid + multi-select + Copy/Paste/Dup/Del/+F). Wired via Frames button in WorkspaceScreen toolbar. Backed by `FrameClipboard` + `ActiveFramePool` (Pencil2D-inspired, original Kotlin).
 
 ## Optional later
 
 - androidx.ink classpath + real InProgressStrokes
-- Frame Viewer modal (FlipaClip-style)
-- Infinite disk undo
+- Infinite disk undo (file-backed beyond current UndoArchive)
+- Live Lottie track (playback-synced, not only import raster)

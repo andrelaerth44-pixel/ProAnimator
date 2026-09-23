@@ -1,1 +1,1 @@
-LOAD_FROM_/home/workdir/artifacts/WorkspaceScreen.kt
+LOAD_FROM_FILE:/home/workdir/ProAnimator/app/src/main/java/com/proanimator/app/ui/workspace/WorkspaceScreen.kt
