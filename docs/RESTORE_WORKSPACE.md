@@ -1,12 +1,9 @@
-# Restore WorkspaceScreen
-
-Full file is large for some push paths. Local artifact: valid 33KB with Frame Viewer.
+# Restore WorkspaceScreen (one command)
 
 ```bash
-# From a good history point (before stub):
-git checkout 98d1ff03 -- app/src/main/java/com/proanimator/app/ui/workspace/WorkspaceScreen.kt
+python3 scripts/join_workspace_screen.py
 ```
 
-Then apply Frame Viewer wire if missing (import FrameClipboard, showFrames, Frames button, FrameViewerSheet early return).
+Joins `docs/ws_parts/part0..4.b64` into the full 703-line WorkspaceScreen.kt with Frame Viewer wired (Frames button + modal).
 
-Or ask the agent to push the full file after reconnect (content ready at session artifacts).
+Requires all five part*.b64 files under docs/ws_parts/.
