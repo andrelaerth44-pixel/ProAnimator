@@ -22,10 +22,6 @@ android {
 }
 
 dependencies {
-    // Optional Jetpack Ink — uncomment when enabling full path:
-    // implementation("androidx.ink:ink-nativeloader:1.0.0")
-    // implementation("androidx.ink:ink-brush:1.0.0")
-    // implementation("androidx.ink:ink-strokes:1.0.0")
-    // implementation("androidx.ink:ink-authoring-compose:1.0.0")
-    // implementation("androidx.ink:ink-brush-compose:1.0.0")
+    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    implementation("androidx.compose.ui:ui-graphics")
 }

@@ -24,5 +24,5 @@ android {
 dependencies {
     implementation(project(":domain"))
     implementation(project(":core:engine"))
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 }

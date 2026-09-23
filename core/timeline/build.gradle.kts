@@ -23,5 +23,10 @@ android {
 
 dependencies {
     implementation(project(":domain"))
+    implementation(project(":core:brushes"))
+    implementation(project(":core:engine"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    implementation("androidx.compose.ui:ui-graphics")
 }
