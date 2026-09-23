@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.proanimator.core.timeline.DrawLayer
+import com.proanimator.core.timeline.LayerBlendMode
 
 @Composable
 fun LayerPanel(
@@ -27,13 +28,14 @@ fun LayerPanel(
     onSelect: (Int) -> Unit,
     onToggleVisible: (Int) -> Unit,
     onOpacity: (Int, Float) -> Unit,
+    onBlendMode: (Int, LayerBlendMode) -> Unit = { _, _ -> },
     onAdd: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
-            .width(132.dp)
+            .width(140.dp)
             .fillMaxHeight()
             .background(Color(0xFF1A1A1A))
             .padding(6.dp)
@@ -46,7 +48,6 @@ fun LayerPanel(
         }
         Spacer(Modifier.height(6.dp))
 
-        // Opacity of active layer
         val active = layers.getOrNull(activeIndex)
         if (active != null) {
             Text(
@@ -65,6 +66,25 @@ fun LayerPanel(
                     inactiveTrackColor = Color(0xFF333333)
                 )
             )
+            // Blend mode cycle
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(0xFF2A2A2A))
+                    .clickable {
+                        val modes = LayerBlendMode.entries
+                        val next = modes[(active.blendMode.ordinal + 1) % modes.size]
+                        onBlendMode(activeIndex, next)
+                    }
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    "Blend: ${active.blendMode.name.take(8)}",
+                    color = Color(0xFF03DAC6),
+                    fontSize = 9.sp
+                )
+            }
             Spacer(Modifier.height(4.dp))
         }
 
@@ -106,12 +126,13 @@ fun LayerPanel(
                             modifier = Modifier.clickable { onToggleVisible(index) }
                         )
                     }
-                    if (layer.opacity < 0.99f) {
-                        Text(
-                            "${(layer.opacity * 100).toInt()}%",
-                            color = Color.Gray,
-                            fontSize = 8.sp
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (layer.opacity < 0.99f) {
+                            Text("${(layer.opacity * 100).toInt()}%", color = Color.Gray, fontSize = 8.sp)
+                        }
+                        if (layer.blendMode != LayerBlendMode.NORMAL) {
+                            Text(layer.blendMode.name.take(3), color = Color(0xFF03DAC6), fontSize = 8.sp)
+                        }
                     }
                 }
                 Spacer(Modifier.height(3.dp))
