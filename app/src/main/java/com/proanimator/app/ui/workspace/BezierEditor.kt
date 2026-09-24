@@ -3,6 +3,7 @@ package com.proanimator.app.ui.workspace
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -70,25 +71,35 @@ fun BezierEditor(
                             onDragStart = { offset ->
                                 val w = size.width.toFloat()
                                 val h = size.height.toFloat()
-                                val nx = (offset.x / w).coerceIn(0f, 1f)
-                                val ny = 1f - (offset.y / h).coerceIn(0f, 1f)
-                                val d1 = (nx - p1.x).pow(2) + (ny - p1.y).pow(2)
-                                val d2 = (nx - p2.x).pow(2) + (ny - p2.y).pow(2)
-                                dragging = if (d1 <= d2) 1 else 2
+                                val s1 = Offset(p1.x * w, (1f - p1.y) * h)
+                                val s2 = Offset(p2.x * w, (1f - p2.y) * h)
+                                val d1 = (offset - s1).getDistance()
+                                val d2 = (offset - s2).getDistance()
+                                dragging = when {
+                                    d1 < 28f && d1 <= d2 -> 1
+                                    d2 < 28f -> 2
+                                    else -> 0
+                                }
                             },
+                            onDragEnd = { dragging = 0 },
+                            onDragCancel = { dragging = 0 },
                             onDrag = { change, _ ->
-                                val w = size.width.toFloat()
-                                val h = size.height.toFloat()
+                                change.consume()
+                                val w = size.width.toFloat().coerceAtLeast(1f)
+                                val h = size.height.toFloat().coerceAtLeast(1f)
                                 val nx = (change.position.x / w).coerceIn(0f, 1f)
                                 val ny = (1f - change.position.y / h).coerceIn(-0.5f, 1.5f)
-                                if (dragging == 1) {
-                                    p1 = Offset(nx, ny)
-                                } else if (dragging == 2) {
-                                    p2 = Offset(nx, ny)
+                                when (dragging) {
+                                    1 -> {
+                                        p1 = Offset(nx, ny)
+                                        onChange(p1.x, p1.y, p2.x, p2.y)
+                                    }
+                                    2 -> {
+                                        p2 = Offset(nx, ny)
+                                        onChange(p1.x, p1.y, p2.x, p2.y)
+                                    }
                                 }
-                                onChange(p1.x, p1.y, p2.x, p2.y)
-                            },
-                            onDragEnd = { dragging = 0 }
+                            }
                         )
                     }
             ) {
@@ -96,18 +107,17 @@ fun BezierEditor(
                 val h = size.height
 
                 // Grid
-                for (i in 1..3) {
-                    val f = i / 4f
-                    drawLine(Color(0xFF3A3A3A), Offset(f * w, 0f), Offset(f * w, h), 1f)
-                    drawLine(Color(0xFF3A3A3A), Offset(0f, f * h), Offset(w, f * h), 1f)
+                for (i in 0..4) {
+                    val gx = w * i / 4f
+                    val gy = h * i / 4f
+                    drawLine(Color(0xFF3A3A3A), Offset(gx, 0f), Offset(gx, h), 1f)
+                    drawLine(Color(0xFF3A3A3A), Offset(0f, gy), Offset(w, gy), 1f)
                 }
 
-                fun toScreen(u: Float, v: Float) = Offset(u * w, (1f - v) * h)
-
-                val s0 = toScreen(0f, 0f)
-                val s1 = toScreen(p1.x, p1.y)
-                val s2 = toScreen(p2.x, p2.y)
-                val s3 = toScreen(1f, 1f)
+                val s0 = Offset(0f, h)
+                val s1 = Offset(p1.x * w, (1f - p1.y) * h)
+                val s2 = Offset(p2.x * w, (1f - p2.y) * h)
+                val s3 = Offset(w, 0f)
 
                 // Handles
                 drawLine(
@@ -188,9 +198,3 @@ private fun BezierPresetChip(label: String, onClick: () -> Unit) {
         Text(label, color = Color.White, fontSize = 9.sp)
     }
 }
-
-// Need clickable import
-private fun Modifier.clickable(onClick: () -> Unit): Modifier =
-    this.then(
-        androidx.compose.foundation.clickable(onClick = onClick)
-    )
