@@ -7,10 +7,11 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.changedToUp
 import com.proanimator.domain.model.StrokePoint
 
 /**
- * Stroke with pressure + palm rejection (no internal MotionEvent API).
+ * Stroke with pressure + palm rejection (Compose-safe, no MotionEvent internals).
  */
 suspend fun PointerInputScope.detectPressureStroke(
     onStart: (StrokePoint) -> Unit,
@@ -24,40 +25,45 @@ suspend fun PointerInputScope.detectPressureStroke(
         down.consume()
 
         val isStylus = down.type == PointerType.Stylus
-
-        val pressure0 = normalizePressure(down)
         val canvas0 = toCanvas(down.position)
-        onStart(StrokePoint(canvas0.x, canvas0.y, pressure0))
+        onStart(StrokePoint(canvas0.x, canvas0.y, pressureOf(down)))
 
         var cancelled = false
-        do {
+        while (!cancelled) {
             val event = awaitPointerEvent(PointerEventPass.Main)
+            val changes = event.changes
 
-            // Multi-touch: abort (pinch owns the gesture)
-            if (event.changes.count { it.pressed } > 1) {
+            // Pinch / multi-touch → cancel stroke
+            if (changes.count { it.pressed } > 1) {
                 cancelled = true
                 onCancel()
-                return@awaitEachGesture
+                break
             }
 
-            event.changes.forEach { change ->
-                if (!change.pressed) return@forEach
-                if (isStylus && change.type == PointerType.Touch) {
+            var anyPressed = false
+            changes.forEach { change ->
+                if (change.pressed) {
+                    anyPressed = true
+                    if (isStylus && change.type == PointerType.Touch) {
+                        change.consume()
+                        return@forEach
+                    }
+                    val c = toCanvas(change.position)
+                    onMove(StrokePoint(c.x, c.y, pressureOf(change)))
                     change.consume()
-                    return@forEach
+                } else if (change.changedToUp()) {
+                    change.consume()
                 }
-                val p = normalizePressure(change)
-                val c = toCanvas(change.position)
-                onMove(StrokePoint(c.x, c.y, p))
-                change.consume()
             }
-        } while (event.changes.any { it.pressed } && !cancelled)
+
+            if (!anyPressed) break
+        }
 
         if (!cancelled) onEnd()
     }
 }
 
-private fun normalizePressure(change: PointerInputChange): Float {
+private fun pressureOf(change: PointerInputChange): Float {
     val raw = change.pressure
     if (raw <= 0.01f && change.type != PointerType.Stylus) return 1f
     return if (raw > 1f) (raw / 1.5f).coerceIn(0.05f, 1f)

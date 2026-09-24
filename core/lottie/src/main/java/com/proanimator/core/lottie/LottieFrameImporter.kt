@@ -38,7 +38,7 @@ class LottieFrameImporter(private val context: Context) {
         try {
             val result = LottieCompositionFactory.fromAssetSync(context, assetName)
             val composition = result.value
-                ?: return@withContext Result.failure(result.exception ?: IllegalStateException("Failed to parse $assetName"))
+                ?: return@withContext Result.failure(IllegalStateException("Failed to parse $assetName"))
             rasterize(composition, assetName, targetWidth, targetHeight, maxFrames)
         } catch (e: Exception) {
             Result.failure(e)
@@ -70,7 +70,7 @@ class LottieFrameImporter(private val context: Context) {
         try {
             val result = LottieCompositionFactory.fromJsonInputStreamSync(stream, name)
             val composition = result.value
-                ?: return@withContext Result.failure(result.exception ?: IllegalStateException("Failed to parse $name"))
+                ?: return@withContext Result.failure(IllegalStateException("Failed to parse $name"))
             rasterize(composition, name, targetWidth, targetHeight, maxFrames)
         } catch (e: Exception) {
             Result.failure(e)

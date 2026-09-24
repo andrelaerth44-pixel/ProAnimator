@@ -34,15 +34,33 @@ jobs:
         run: python3 scripts/decode_workspace_screen.py
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace --no-daemon
+        id: build
+        continue-on-error: true
+        run: |
+          set +e
+          gradle assembleDebug --stacktrace --no-daemon 2>&1 | tee build_output.log
+          code=${PIPESTATUS[0]}
+          echo "===== COMPILE ERRORS ====="
+          grep -E "e: file:|error:|FAILED|Unresolved reference|Compilation error" build_output.log || true
+          echo "===== END ERRORS ====="
+          exit $code
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build_output.log
+          if-no-files-found: ignore
 
       - name: Upload APK
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: ProAnimator-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: List APK
-        if: success()
-        run: ls -lah app/build/outputs/apk/debug/
+      - name: Fail if build failed
+        if: steps.build.outcome != 'success'
+        run: exit 1
